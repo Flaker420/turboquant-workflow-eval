@@ -1,0 +1,10 @@
+[project]
+name = "qwen35-turboquant-workflow-study"
+version = "0.1.0"
+description = "RunPod-first practical workflow study scaffold for Qwen3.5-9B compression comparisons."
+readme = "README.md"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

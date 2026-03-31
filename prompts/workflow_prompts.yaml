@@ -1,0 +1,136 @@
+prompts:
+  - id: reasoning_01
+    category: reasoning
+    title: layer-policy tradeoff
+    watch_for: balanced tradeoff analysis
+    prompt: |
+      You are reviewing a proposal to compress only the full-attention layers of a hybrid transformer while leaving the linear-attention layers untouched.
+      Give the strongest argument in favor of the proposal, the strongest argument against it, and a practical recommendation.
+
+  - id: reasoning_02
+    category: reasoning
+    title: escalation decision
+    watch_for: concrete operational judgment
+    prompt: |
+      A system change reduces memory use by 28% but causes occasional quality regressions on high-stakes prompts.
+      Write a decision memo with three deployment options and recommend one.
+
+  - id: reasoning_03
+    category: reasoning
+    title: failure triage
+    watch_for: structured diagnosis
+    prompt: |
+      A new inference optimization speeds up generation but causes subtle answer drift only on long prompts.
+      Propose a triage plan that distinguishes prompt-format bugs, cache-compression bugs, and model-loading bugs.
+
+  - id: reasoning_04
+    category: reasoning
+    title: prioritization memo
+    watch_for: ranked action plan
+    prompt: |
+      You have one GPU-day left for experimentation.
+      Rank these priorities: quality validation, memory savings, latency, reproducibility, and explain the order.
+
+  - id: math_01
+    category: math
+    title: CAGR walkthrough
+    watch_for: correct numeric reasoning
+    prompt: |
+      A metric grows from 12 to 21 over 3 years.
+      Compute the compound annual growth rate and show the steps clearly.
+
+  - id: math_02
+    category: math
+    title: weighted average
+    watch_for: correct arithmetic
+    prompt: |
+      A model gets scores of 78, 84, and 91 on three tasks with weights 0.2, 0.3, and 0.5.
+      Compute the weighted average and explain each multiplication.
+
+  - id: math_03
+    category: math
+    title: constrained optimization intuition
+    watch_for: coherent mathematical explanation
+    prompt: |
+      Explain, at an intuitive level, why adding a memory constraint can change the best engineering solution even if raw model quality stays constant.
+
+  - id: math_04
+    category: math
+    title: token budget estimate
+    watch_for: simple, correct estimate
+    prompt: |
+      Estimate the total number of generated tokens if 12 prompts each produce about 170 tokens on average.
+      Show the arithmetic and give the final answer.
+
+  - id: coding_01
+    category: coding
+    title: first duplicate helper
+    watch_for: working Python and complexity note
+    prompt: |
+      Write a Python function that returns the first repeated element in a list, or None if there is no repetition.
+      Include a short explanation of time complexity.
+
+  - id: coding_02
+    category: coding
+    title: rolling mean
+    watch_for: correct edge handling
+    prompt: |
+      Write a Python function that computes a rolling mean for a list of floats given a window size.
+      Handle invalid window sizes cleanly.
+
+  - id: coding_03
+    category: coding
+    title: JSONL loader
+    watch_for: clean code and practical safeguards
+    prompt: |
+      Write Python code to read a JSONL file and return a list of records.
+      Ignore blank lines and raise a clear exception for malformed JSON.
+
+  - id: coding_04
+    category: coding
+    title: adapter skeleton
+    watch_for: class structure and clarity
+    prompt: |
+      Write a minimal Python class skeleton for an adapter interface with methods prepare_model, describe, and cleanup.
+      Add short docstrings.
+
+  - id: retrieval_01
+    category: retrieval
+    title: inline retrieval A
+    watch_for: faithful extraction
+    prompt: |
+      Use only the context below.
+
+      [Context]
+      Project name: North Star
+      Owner: Priya
+      Deployment target: Secure Cloud Pod
+      Preferred storage: network volume mounted at /workspace
+      First acceptance test: compare baseline and safe policy outputs
+      GPU target: RTX 4090 or RTX 5090
+      [/Context]
+
+      Question:
+      Who owns the project, what storage path is preferred, and what is the first acceptance test?
+
+  - id: retrieval_02
+    category: retrieval
+    title: inline retrieval B
+    watch_for: no hallucinated fields
+    prompt: |
+      Answer only from this context.
+
+      [Context]
+      Experiment group alpha:
+      - baseline: pass-through reference
+      - safe: conservative compression profile
+      - aggressive: stress profile after safe succeeds
+      Report files:
+      - workflow_compare.csv
+      - rows.jsonl
+      - examples.md
+      - run_summary.json
+      [/Context]
+
+      Question:
+      Name the three experiment groups and the four report files.

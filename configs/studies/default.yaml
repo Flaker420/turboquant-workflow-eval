@@ -1,0 +1,18 @@
+name: qwen35_turboquant_workflow_study
+model_config: configs/model/qwen35_9b_text_only.yaml
+prompt_pack: prompts/workflow_prompts.yaml
+policy_configs:
+  - configs/policies/baseline.yaml
+  - configs/policies/safe_template.yaml
+  - configs/policies/aggressive_template.yaml
+runtime:
+  max_input_tokens: 4096
+  max_new_tokens: 256
+  do_sample: false
+  temperature: 0.0
+  top_p: 1.0
+  use_cache: true
+  cleanup_between_policies: true
+outputs:
+  write_individual_text_files: true
+  truncate_csv_output_to_chars: 180
