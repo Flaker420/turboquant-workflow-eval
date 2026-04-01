@@ -1,7 +1,9 @@
-torch>=2.4
 accelerate>=1.0
 numpy>=1.26
+packaging>=24.2
 pyyaml>=6.0.2
 pytest>=8.3
-packaging>=24.2
 transformers>=4.57.0
+
+# Torch is installed separately on RunPod to match the system CUDA toolkit.
+# See scripts/bootstrap_runpod.sh and docs/manual-runbook.md.

@@ -15,13 +15,13 @@ This repository is **not** a paper-style ablation project. It is a compact evalu
 ## Ready-to-run status
 
 The scaffold is **ready to run** for:
-- environment setup
+- RunPod environment setup with the validated cu128 torch stack
 - dependency installation
 - explicit model/tokenizer cache warmup
 - preflight instrumentation
 - baseline workflow study
 
-It is **not** a fake production TurboQuant package. To compare real compression policies, you still need to point the `safe` and `aggressive` policy configs at a real backend adapter.
+It now includes a **local Transformers-side patch adapter** for a conservative full-attention-only workflow comparison. This adapter is a behavioral proxy that quantizes K/V projection outputs in the 8 full-attention layers. It is useful for practical evaluation, but it does **not** claim true KV-cache memory savings.
 
 ## What is built in
 
@@ -41,7 +41,11 @@ Built in and ready to run:
 
 This repository does **not** pretend to ship a production TurboQuant kernel.
 
-To compare actual compression policies, you need to point the `safe` and `aggressive` policies at a real backend by implementing or importing an adapter class. The adapter interface is intentionally small and documented in `docs/adapter-interface.md`.
+What is included now:
+- a pass-through baseline adapter
+- a local Transformers-side safe adapter for conservative full-attention-only comparison
+
+If you later add a true TurboQuant backend, you can still point the policies at a different adapter class. The adapter interface is intentionally small and documented in `docs/adapter-interface.md`.
 
 ## RunPod-first design
 
@@ -53,11 +57,22 @@ Recommended directories on the mounted volume:
 - `/workspace/.cache/huggingface`
 - `/workspace/outputs`
 
+## Current validated RunPod state
+
+The current validated environment for this repository is:
+
+- system CUDA toolkit / `nvcc`: **12.8**
+- PyTorch: **2.10.0+cu128**
+- Triton: **3.6.0**
+- native Qwen3.5 non-thinking toggle enabled through local `apply_chat_template(..., enable_thinking=False)`
+
+This is why the RunPod bootstrap installs torch separately from the base requirements. See `docs/current-runpod-state.md` for the full note and caveats.
+
 ## Fastest path on RunPod
 
 ### 1) Bootstrap, install requirements, and optionally warm the model cache
 
-Install only:
+Install the validated RunPod environment only:
 
 ```bash
 bash scripts/bootstrap_runpod.sh
@@ -65,7 +80,7 @@ source .env.runpod
 source /workspace/venvs/qwen35-turboquant-study/bin/activate
 ```
 
-Install + explicit full model download:
+Install the validated environment and warm the model cache:
 
 ```bash
 bash scripts/bootstrap_runpod.sh --download-model
@@ -73,10 +88,10 @@ source .env.runpod
 source /workspace/venvs/qwen35-turboquant-study/bin/activate
 ```
 
-Install + tokenizer-only cache warmup:
+Install the validated environment and attempt the optional fast-path packages:
 
 ```bash
-bash scripts/bootstrap_runpod.sh --download-model --tokenizer-only
+bash scripts/bootstrap_runpod.sh --download-model --fast-path
 source .env.runpod
 source /workspace/venvs/qwen35-turboquant-study/bin/activate
 ```
@@ -108,13 +123,15 @@ Baseline only:
 make study POLICY_CONFIGS=configs/policies/baseline.yaml OUTPUT_DIR=outputs/study_baseline
 ```
 
-Baseline plus your real policies after you wire adapters:
+Baseline plus the built-in safe policy:
 
 ```bash
 make study \
-  POLICY_CONFIGS=configs/policies/baseline.yaml,configs/policies/safe_template.yaml,configs/policies/aggressive_template.yaml \
+  POLICY_CONFIGS=configs/policies/baseline.yaml,configs/policies/safe_template.yaml \
   OUTPUT_DIR=outputs/study_compare
 ```
+
+After that, you can optionally enable the aggressive template for a second-pass stress comparison.
 
 ## Manual step-by-step path
 
@@ -129,7 +146,7 @@ That document includes each step separately plus the parameters for each script.
 ### `scripts/bootstrap_runpod.sh`
 
 ```bash
-bash scripts/bootstrap_runpod.sh [--download-model] [--tokenizer-only] [--model-config PATH]
+bash scripts/bootstrap_runpod.sh [--download-model] [--tokenizer-only] [--fast-path] [--model-config PATH]
 ```
 
 Environment overrides:
@@ -205,3 +222,4 @@ This repository is intentionally opinionated:
 - freeze the Qwen3.5 architecture priors
 - vary compression **policy**, not model architecture
 - optimize for **workflow decisions**, not paper completeness
+- treat the built-in local patch as a practical proxy, not as proof of TurboQuant-equivalent memory compression

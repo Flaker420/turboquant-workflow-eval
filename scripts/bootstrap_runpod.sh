@@ -4,11 +4,12 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  bash scripts/bootstrap_runpod.sh [--download-model] [--tokenizer-only] [--model-config PATH]
+  bash scripts/bootstrap_runpod.sh [--download-model] [--tokenizer-only] [--fast-path] [--model-config PATH]
 
 Options:
   --download-model   Warm the Hugging Face cache after installing dependencies.
   --tokenizer-only   Only valid with --download-model. Cache tokenizer/config only.
+  --fast-path        Attempt optional fast-path packages after the base environment is ready.
   --model-config     Model config to use for cache warmup.
   -h, --help         Show this help message.
 
@@ -25,6 +26,7 @@ REPO_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 DOWNLOAD_MODEL=0
 TOKENIZER_ONLY=0
+FAST_PATH=0
 MODEL_CONFIG="configs/model/qwen35_9b_text_only.yaml"
 
 while [[ $# -gt 0 ]]; do
@@ -35,6 +37,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --tokenizer-only)
       TOKENIZER_ONLY=1
+      shift
+      ;;
+    --fast-path)
+      FAST_PATH=1
       shift
       ;;
     --model-config)
@@ -66,11 +72,16 @@ OUTPUT_ROOT="${OUTPUT_ROOT:-${WORKSPACE_ROOT}/outputs}"
 mkdir -p "$(dirname "${VENV_DIR}")" "${CACHE_ROOT}" "${OUTPUT_ROOT}"
 
 python -m venv "${VENV_DIR}"
-# shellcheck disable=SC1090
 source "${VENV_DIR}/bin/activate"
 
-python -m pip install --upgrade pip setuptools wheel
+python -m pip install --upgrade pip "setuptools<82" wheel ninja
+python -m pip install -r "${REPO_DIR}/requirements-runpod-cu128.txt"
 python -m pip install -r "${REPO_DIR}/requirements.txt"
+
+if [[ "$FAST_PATH" -eq 1 ]]; then
+  python -m pip install -U flash-linear-attention || true
+  python -m pip install -U causal-conv1d --no-build-isolation || true
+fi
 
 cat > "${REPO_DIR}/.env.runpod" <<EOF
 export HF_HOME="${CACHE_ROOT}"
@@ -79,7 +90,6 @@ export PYTHONPATH="${REPO_DIR}/src"
 export TOKENIZERS_PARALLELISM=false
 EOF
 
-# shellcheck disable=SC1091
 source "${REPO_DIR}/.env.runpod"
 
 if [[ "$DOWNLOAD_MODEL" -eq 1 ]]; then
@@ -93,13 +103,15 @@ fi
 cat <<EOF
 Bootstrap complete.
 
+Environment summary:
+  VENV_DIR=${VENV_DIR}
+  CACHE_ROOT=${CACHE_ROOT}
+  OUTPUT_ROOT=${OUTPUT_ROOT}
+
 Next steps:
   source "${REPO_DIR}/.env.runpod"
   source "${VENV_DIR}/bin/activate"
   cd "${REPO_DIR}"
   python scripts/validate_environment.py
   pytest -q
-
-Optional cache warmup during bootstrap:
-  bash scripts/bootstrap_runpod.sh --download-model
 EOF

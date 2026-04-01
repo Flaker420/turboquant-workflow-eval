@@ -7,21 +7,37 @@ This document is the step-by-step path for running the repository manually on Ru
 ```bash
 python -m venv /workspace/venvs/qwen35-turboquant-study
 source /workspace/venvs/qwen35-turboquant-study/bin/activate
-pip install --upgrade pip setuptools wheel
-pip install -r requirements.txt
+python -m pip install --upgrade pip "setuptools<82" wheel ninja
+python -m pip install -r requirements-runpod-cu128.txt
+python -m pip install -r requirements.txt
 export HF_HOME=/workspace/.cache/huggingface
 export TRANSFORMERS_CACHE=/workspace/.cache/huggingface
 export PYTHONPATH=$PWD/src
 export TOKENIZERS_PARALLELISM=false
 ```
 
-## 2. Validate imports and GPU visibility
+### Why this order matters
+
+On the validated RunPod environment, the system CUDA toolkit is 12.8. Installing `torch==2.10.0+cu128` first keeps the Python stack aligned with that toolkit. Avoid installing a generic latest torch wheel into this venv.
+
+## 2. Optional fast-path packages
+
+```bash
+python -m pip install -U flash-linear-attention
+python -m pip install -U causal-conv1d --no-build-isolation || true
+```
+
+Notes:
+- `fla` and `causal_conv1d` may import successfully while Qwen still prints a fast-path warning in Transformers.
+- Treat that warning as non-blocking unless profiling proves otherwise.
+
+## 3. Validate imports and GPU visibility
 
 ```bash
 python scripts/validate_environment.py
 ```
 
-## 3. Warm the Hugging Face cache
+## 4. Warm the Hugging Face cache
 
 Model + tokenizer:
 
@@ -40,13 +56,13 @@ Optional parameters:
 - `--tokenizer-only`
 - `--output PATH`
 
-## 4. Run tests
+## 5. Run tests
 
 ```bash
 pytest -q
 ```
 
-## 5. List discovered attention blocks
+## 6. List discovered attention blocks
 
 ```bash
 python scripts/list_attention_blocks.py --model-config configs/model/qwen35_9b_text_only.yaml
@@ -56,7 +72,7 @@ Optional parameters:
 - `--model-config PATH`
 - `--output PATH`
 
-## 6. Run preflight instrumentation
+## 7. Run preflight instrumentation
 
 ```bash
 python scripts/run_preflight_stats.py \
@@ -69,7 +85,7 @@ Optional parameters:
 - `--output-dir PATH`
 - `--prompts-file PATH`
 
-## 7. Run the workflow study
+## 8. Run the workflow study
 
 Baseline only:
 
@@ -80,12 +96,12 @@ python scripts/run_workflow_study.py \
   --output-dir outputs/study_baseline
 ```
 
-Multiple policies:
+Baseline + built-in safe policy:
 
 ```bash
 python scripts/run_workflow_study.py \
   --study-config configs/studies/default.yaml \
-  --policy-configs configs/policies/baseline.yaml,configs/policies/safe_template.yaml,configs/policies/aggressive_template.yaml \
+  --policy-configs configs/policies/baseline.yaml,configs/policies/safe_template.yaml \
   --output-dir outputs/study_compare
 ```
 
@@ -94,7 +110,7 @@ Optional parameters:
 - `--policy-configs PATH1,PATH2,...`
 - `--output-dir PATH`
 
-## 8. Expected outputs
+## 9. Expected outputs
 
 Workflow study outputs:
 - `workflow_compare.csv`

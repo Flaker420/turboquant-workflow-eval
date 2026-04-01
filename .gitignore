@@ -14,3 +14,9 @@ logs/
 .cache/
 .env.runpod
 .DS_Store
+.ipynb_checkpoints/
+__pycache__/
+.pytest_cache/
+outputs/
+.env.runpod
+TREE.txt

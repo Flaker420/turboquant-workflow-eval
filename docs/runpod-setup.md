@@ -7,6 +7,17 @@ This repository is designed around the common RunPod pattern:
 - default volume mount path `/workspace`
 - PyTorch-oriented interactive workflow
 
+## Validated environment
+
+Current validated working state on RunPod:
+
+- `nvcc` / system toolkit: CUDA 12.8
+- `torch==2.10.0+cu128`
+- `triton==3.6.0`
+- optional fast-path packages may install successfully while Qwen still prints a stale warning
+
+Use the bootstrap script or the manual runbook exactly as written so the torch build matches the system CUDA toolkit.
+
 ## Suggested layout
 
 - repository: `/workspace/<repo-name>`
@@ -16,7 +27,7 @@ This repository is designed around the common RunPod pattern:
 
 ## Automated setup
 
-Install dependencies only:
+Base environment only:
 
 ```bash
 bash scripts/bootstrap_runpod.sh
@@ -24,10 +35,18 @@ source .env.runpod
 source /workspace/venvs/qwen35-turboquant-study/bin/activate
 ```
 
-Install dependencies and warm the model cache:
+Base environment + model cache warmup:
 
 ```bash
 bash scripts/bootstrap_runpod.sh --download-model
+source .env.runpod
+source /workspace/venvs/qwen35-turboquant-study/bin/activate
+```
+
+Base environment + optional fast-path package attempt:
+
+```bash
+bash scripts/bootstrap_runpod.sh --download-model --fast-path
 source .env.runpod
 source /workspace/venvs/qwen35-turboquant-study/bin/activate
 ```

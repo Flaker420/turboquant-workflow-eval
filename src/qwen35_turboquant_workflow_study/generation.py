@@ -11,12 +11,13 @@ def render_prompt(tokenizer, prompt_text: str) -> str:
     chat_template = getattr(tokenizer, "chat_template", None)
     if chat_template:
         messages = [{"role": "user", "content": prompt_text}]
-        try:
-            return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        except Exception:  # noqa: BLE001
-            return prompt_text
+        return tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
+        )
     return prompt_text
-
 
 def _peak_vram_gb(device) -> float | None:
     if device.type != "cuda":
@@ -61,6 +62,7 @@ def generate_one(model, tokenizer, prompt_text: str, runtime_cfg: dict) -> dict:
     output_ids = generated[0][prompt_tokens:]
     output_tokens = int(output_ids.shape[-1])
     output_text = tokenizer.decode(output_ids, skip_special_tokens=True).strip()
+
     tokens_per_second = (output_tokens / latency_s) if latency_s > 0 else None
 
     return {
