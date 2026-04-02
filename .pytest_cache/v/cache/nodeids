@@ -1,9 +1,0 @@
-[
-  "tests/test_config.py::test_load_yaml_roundtrip",
-  "tests/test_local_patch_adapter.py::test_fake_quant_last_dim_preserves_shape",
-  "tests/test_module_discovery.py::test_discover_attention_blocks_filters_non_attention",
-  "tests/test_openai_backend.py::test_backend_description_contains_model",
-  "tests/test_prompts.py::test_load_prompt_pack",
-  "tests/test_reporting.py::test_reporting_outputs",
-  "tests/test_reporting.py::test_slugify"
-]
