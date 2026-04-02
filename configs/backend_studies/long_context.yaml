@@ -1,0 +1,11 @@
+name: qwen35_backend_long_context_study
+prompt_pack: ../../prompts/long_context_workflow_prompts.yaml
+backend_configs:
+  - ../backends/qwen35_openai_server.yaml
+runtime:
+  max_new_tokens: 384
+  temperature: 0.0
+  top_p: 1.0
+outputs:
+  write_individual_text_files: true
+  truncate_csv_output_to_chars: 220

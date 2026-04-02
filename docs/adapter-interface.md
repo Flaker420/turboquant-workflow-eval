@@ -53,3 +53,8 @@ This repository does not assume every backend mutates the model the same way. Th
 - a local experimental implementation
 - a thin wrapper around a separate package
 - a staging backend you are evaluating internally
+
+
+## Built-in local patch adapter
+
+The repo now includes a local Transformers-side adapter that patches the full-attention K/V projection outputs with symmetric per-token fake quantization. This is useful for workflow comparisons when you do not yet have a real TurboQuant cache backend wired in. It is intentionally a behavioral proxy and does not claim true KV-cache memory savings.

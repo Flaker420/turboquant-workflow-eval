@@ -1,0 +1,146 @@
+prompts:
+  - id: long_retrieval_01
+    category: retrieval
+    title: buried project facts
+    watch_for: exact extraction without invented fields
+    prompt: |
+      Use only the context below.
+
+      [Context]
+      Program notebook section A:
+      - stage: discovery
+      - owner: systems team
+      - notes: routine housekeeping items
+      - notes: repeated weekly
+      - notes: archive unchanged
+
+      Program notebook section B:
+      - stage: validation
+      - storage path: /mnt/archive
+      - notes: legacy path retained for reference
+      - notes: not the active deployment target
+
+      Program notebook section C:
+      - filler item 01: unchanged
+      - filler item 02: unchanged
+      - filler item 03: unchanged
+      - filler item 04: unchanged
+      - filler item 05: unchanged
+      - filler item 06: unchanged
+      - filler item 07: unchanged
+      - filler item 08: unchanged
+      - filler item 09: unchanged
+      - filler item 10: unchanged
+
+      Deployment sheet:
+      - project: North Star
+      - owner: Priya
+      - active storage path: /workspace
+      - first acceptance test: compare baseline and safe policy outputs
+      - gpu target: RTX 4090 or RTX 5090
+
+      Program notebook section D:
+      - filler item 11: unchanged
+      - filler item 12: unchanged
+      - filler item 13: unchanged
+      - filler item 14: unchanged
+      - filler item 15: unchanged
+      - filler item 16: unchanged
+      - filler item 17: unchanged
+      - filler item 18: unchanged
+      - filler item 19: unchanged
+      - filler item 20: unchanged
+      [/Context]
+
+      Question:
+      Name the project owner, the active storage path, and the first acceptance test.
+
+  - id: long_retrieval_02
+    category: retrieval
+    title: buried experiment groups
+    watch_for: no hallucinated experiment names
+    prompt: |
+      Answer only from this context.
+
+      [Context]
+      Trial ledger part 1:
+      - misc group: archive-only
+      - comment: not part of the active experiment
+      - comment: retained for bookkeeping
+
+      Trial ledger part 2:
+      - filler: alpha-old
+      - filler: beta-old
+      - filler: gamma-old
+      - filler: delta-old
+      - filler: epsilon-old
+      - filler: zeta-old
+      - filler: eta-old
+      - filler: theta-old
+
+      Active experiment groups:
+      - baseline: pass-through reference
+      - safe: conservative compression profile
+      - aggressive: stress profile after safe succeeds
+
+      Report files:
+      - workflow_compare.csv
+      - rows.jsonl
+      - examples.md
+      - run_summary.json
+
+      Trial ledger part 3:
+      - filler: archived report A
+      - filler: archived report B
+      - filler: archived report C
+      - filler: archived report D
+      - filler: archived report E
+      [/Context]
+
+      Question:
+      Name the three active experiment groups and the four report files.
+
+  - id: long_reasoning_01
+    category: reasoning
+    title: long deployment memo
+    watch_for: balanced recommendation under long context
+    prompt: |
+      You are reviewing a deployment memo for a hybrid model evaluation project.
+
+      Background notes:
+      - The project has a validated local baseline.
+      - The local safe proxy preserves quality better than the aggressive proxy.
+      - The team now wants real VRAM savings from a server backend.
+      - The serving path is OpenAI-compatible and uses native no-thinking mode.
+      - The first backend probe succeeded after warm-up.
+      - The team wants a practical engineering recommendation rather than a research paper.
+
+      Additional operating notes:
+      - GPU budget is limited.
+      - Reproducibility matters.
+      - Retrieval accuracy must not regress on active workflow prompts.
+      - Long-context prompts are needed to expose real KV pressure.
+      - Cold-start latency should not dominate the decision.
+      - The repository should remain professional and maintainable.
+
+      Write a concise deployment recommendation memo with:
+      1. the strongest reason to move to the real backend now,
+      2. the strongest reason to proceed cautiously,
+      3. the recommended next action.
+
+  - id: long_coding_01
+    category: coding
+    title: backend runner skeleton
+    watch_for: clean implementation plan
+    prompt: |
+      Write a Python function skeleton called run_backend_study that:
+      - loads a prompt pack,
+      - loads one or more backend configs,
+      - runs generation over all prompts,
+      - writes run_summary.json, workflow_compare.csv, rows.jsonl, and examples.md.
+
+      Constraints:
+      - keep it simple and readable,
+      - assume an OpenAI-compatible backend interface,
+      - include short docstrings,
+      - mention where latency, prompt tokens, and output tokens should be recorded.

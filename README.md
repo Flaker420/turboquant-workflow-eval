@@ -185,6 +185,32 @@ python scripts/run_preflight_stats.py [--experiment-config PATH] [--output-dir P
 python scripts/run_workflow_study.py [--study-config PATH] [--policy-configs PATH1,PATH2,...] [--output-dir PATH]
 ```
 
+### `scripts/probe_openai_backend.py`
+
+```bash
+python scripts/probe_openai_backend.py [--backend-config PATH] [--prompt TEXT] [--max-new-tokens N]
+```
+
+### `scripts/run_backend_study.py`
+
+```bash
+python scripts/run_backend_study.py [--study-config PATH] [--backend-configs PATH1,PATH2,...] [--output-dir PATH]
+```
+
+## Real backend path
+
+The repository now includes an OpenAI-compatible backend path for server-side evaluation.
+
+Current backend files:
+- `configs/backends/qwen35_openai_server.yaml`
+- `configs/backend_studies/default.yaml`
+- `configs/backend_studies/long_context.yaml`
+- `prompts/long_context_workflow_prompts.yaml`
+- `scripts/probe_openai_backend.py`
+- `scripts/run_backend_study.py`
+
+Use the backend probe first, then run the backend study once the server is live.
+
 ## Outputs
 
 For each policy you test, the repo produces concrete artifacts you can compare:

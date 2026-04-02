@@ -1,12 +1,16 @@
 name: turboquant_safe
-enabled: false
+enabled: true
 comparison_label: safe
 adapter:
-  import_path: qwen35_turboquant_workflow_study.adapters.external_stub:ExternalCompressionAdapterStub
+  import_path: qwen35_turboquant_workflow_study.adapters.local_transformers_patch:LocalTransformersPatchAdapter
 settings:
-  backend_label: replace_with_real_backend
+  backend_label: local_transformers_patch
   scope: full_attention_only
   profile: safe
+  quant_mode: symmetric_per_token_fake_quant
+  k_bits: 8
+  v_bits: 8
 notes:
-  - Replace the adapter import path with a real backend before enabling this policy.
-  - Intended for your first conservative workflow comparison.
+  - Conservative local Transformers-side proxy for a full-attention-only compression policy.
+  - This patches K/V projection outputs in the 8 full-attention layers only.
+  - It is intended for workflow validation, not as a claim of true TurboQuant memory savings.

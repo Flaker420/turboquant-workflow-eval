@@ -1,0 +1,15 @@
+name: qwen35_openai_server
+enabled: true
+comparison_label: qwen35_server
+backend:
+  import_path: qwen35_turboquant_workflow_study.backends.openai_compatible:OpenAICompatibleBackend
+base_url: http://127.0.0.1:8000/v1
+model: Qwen/Qwen3.5-9B
+api_key_env: OPENAI_API_KEY
+request_defaults:
+  max_tokens: 512
+  temperature: 0.0
+  top_p: 1.0
+request_extra_json:
+  chat_template_kwargs:
+    enable_thinking: false
