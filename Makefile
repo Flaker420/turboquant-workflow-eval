@@ -8,7 +8,7 @@ POLICY_CONFIGS ?= configs/policies/baseline.yaml
 OUTPUT_DIR ?= outputs/study_run
 DOWNLOAD_OUTPUT ?= outputs/download_summary.json
 
-.PHONY: help test validate download-model download-all check-cache list-attention preflight study
+.PHONY: help test validate download-model download-all check-cache list-attention preflight study ui
 
 help:
 	@printf "%s\n" \
@@ -19,7 +19,8 @@ help:
 	  "make check-cache                # Check HF cache status for all models" \
 	  "make list-attention             # Discover attention blocks" \
 	  "make preflight                  # Run preflight instrumentation" \
-	  "make study POLICY_CONFIGS=...   # Run workflow study"
+	  "make study POLICY_CONFIGS=...   # Run workflow study" \
+	  "make ui                         # Launch Gradio web UI"
 
 test:
 	pytest -q
@@ -44,3 +45,6 @@ preflight:
 
 study:
 	python scripts/run_workflow_study.py --study-config $(STUDY_CONFIG) --policy-configs $(POLICY_CONFIGS) --output-dir $(OUTPUT_DIR)
+
+ui:
+	python app.py
