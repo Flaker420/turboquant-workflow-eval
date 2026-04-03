@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from qwen35_turboquant_workflow_study.reporting import slugify, write_csv, write_examples_markdown, write_jsonl
+from turboquant_workflow_eval.reporting import slugify, write_csv, write_examples_markdown, write_jsonl
 
 
 def test_slugify() -> None:

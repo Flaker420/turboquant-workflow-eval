@@ -1,7 +1,7 @@
 [project]
-name = "qwen35-turboquant-workflow-study"
-version = "0.1.0"
-description = "RunPod-first practical workflow study scaffold for Qwen3.5-9B compression comparisons."
+name = "turboquant-workflow-eval"
+version = "0.2.0"
+description = "RunPod-first evaluation harness for TurboQuant KV-cache compression across supported models."
 readme = "README.md"
 requires-python = ">=3.10"
 

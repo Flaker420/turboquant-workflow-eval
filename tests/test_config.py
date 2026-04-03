@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from qwen35_turboquant_workflow_study.config import load_yaml
+from turboquant_workflow_eval.config import load_yaml
 
 
 def test_load_yaml_roundtrip(tmp_path: Path):

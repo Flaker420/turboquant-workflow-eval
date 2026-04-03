@@ -2,11 +2,9 @@ name: turboquant_safe
 enabled: false
 comparison_label: safe
 adapter:
-  import_path: turboquant_core.adapters.workflow_eval:TurboQuantAdapter
+  import_path: turboquant_workflow_eval.adapters.external_stub:ExternalCompressionAdapterStub
 settings:
   bit_width: 4
-
-settings:
   backend_label: replace_with_real_backend
   scope: full_attention_only
   profile: safe

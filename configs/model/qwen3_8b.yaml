@@ -1,0 +1,19 @@
+model_name: Qwen/Qwen3-8B
+language_model_only: false
+device_map: auto
+dtype: bfloat16
+trust_remote_code: true
+attn_implementation: sdpa
+chat_template_mode: auto
+layout:
+  total_lm_layers: 36
+  attention_blocks: 36
+  deltanet_blocks: 0
+  pattern: "36 x dense attention"
+context:
+  short: 2048
+  medium: 16384
+  long: null
+notes:
+  - Dense attention model — all 36 layers use standard attention.
+  - Uses Qwen3DenseKVBackend from turboquant-core for compression.

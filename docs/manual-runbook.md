@@ -5,8 +5,8 @@ This document is the step-by-step path for running the repository manually on Ru
 ## 1. Create the environment
 
 ```bash
-python -m venv /workspace/venvs/qwen35-turboquant-study
-source /workspace/venvs/qwen35-turboquant-study/bin/activate
+python -m venv /workspace/venvs/turboquant-eval
+source /workspace/venvs/turboquant-eval/bin/activate
 python -m pip install --upgrade pip "setuptools<82" wheel ninja
 python -m pip install -r requirements-runpod-cu128.txt
 python -m pip install -r requirements.txt
@@ -39,10 +39,16 @@ python scripts/validate_environment.py
 
 ## 4. Warm the Hugging Face cache
 
-Model + tokenizer:
+Model + tokenizer (Qwen3.5-9B, default):
 
 ```bash
 python scripts/download_model.py --model-config configs/model/qwen35_9b_text_only.yaml
+```
+
+Model + tokenizer (Qwen3-8B):
+
+```bash
+python scripts/download_model.py --model-config configs/model/qwen3_8b.yaml
 ```
 
 Tokenizer only:
@@ -96,7 +102,7 @@ python scripts/run_workflow_study.py \
   --output-dir outputs/study_baseline
 ```
 
-Baseline + built-in safe policy:
+Baseline + safe policy (after wiring a real backend):
 
 ```bash
 python scripts/run_workflow_study.py \
@@ -117,4 +123,4 @@ Workflow study outputs:
 - `rows.jsonl`
 - `examples.md`
 - `run_summary.json`
-- `texts/` directory with one file per prompt/policy
+- `text_outputs/` directory with one file per prompt/policy

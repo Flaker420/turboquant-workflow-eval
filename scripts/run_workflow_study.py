@@ -10,7 +10,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from qwen35_turboquant_workflow_study.study import run_workflow_study
+from turboquant_workflow_eval.study import run_workflow_study
 
 
 def main() -> None:

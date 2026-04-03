@@ -10,15 +10,15 @@ The repository ships with a **baseline pass-through adapter** only. To test a re
 
 Your class should inherit from `CompressionAdapter` and implement:
 
-- `name` – human-readable adapter name
-- `prepare_model(model, tokenizer, model_cfg, policy_cfg)` – return the prepared model and tokenizer
-- `describe(policy_cfg)` – return a small dictionary for metadata
-- `cleanup(model)` – optional teardown
+- `name` -- human-readable adapter name
+- `prepare_model(model, tokenizer, model_cfg, policy_cfg)` -- return the prepared model and tokenizer
+- `describe(policy_cfg)` -- return a small dictionary for metadata
+- `cleanup(model)` -- optional teardown
 
 ## Minimal example
 
 ```python
-from qwen35_turboquant_workflow_study.adapters.base import CompressionAdapter
+from turboquant_workflow_eval.adapters.base import CompressionAdapter
 
 class MyTurboQuantAdapter(CompressionAdapter):
     name = "my-turboquant"
@@ -53,3 +53,37 @@ This repository does not assume every backend mutates the model the same way. Th
 - a local experimental implementation
 - a thin wrapper around a separate package
 - a staging backend you are evaluating internally
+
+## Wiring turboquant-core
+
+[turboquant-core](https://github.com/Flaker420/turboquant-core) provides model-specific backends for KV-cache compression:
+
+| Model | Backend |
+|-------|---------|
+| Qwen3.5-9B | `Qwen35KVBackend` |
+| Qwen3-8B | `Qwen3DenseKVBackend` |
+
+A minimal adapter wrapping turboquant-core would look like:
+
+```python
+from turboquant_workflow_eval.adapters.base import CompressionAdapter
+from turboquant_core.backends import Qwen35KVBackend
+
+class TurboQuantSafeAdapter(CompressionAdapter):
+    name = "turboquant-safe"
+
+    def prepare_model(self, model, tokenizer, model_cfg, policy_cfg):
+        backend = Qwen35KVBackend(
+            bit_width=policy_cfg["settings"].get("bit_width", 4),
+        )
+        model = backend.patch(model)
+        return model, tokenizer
+
+    def describe(self, policy_cfg):
+        return {
+            "adapter": self.name,
+            "bit_width": policy_cfg["settings"].get("bit_width", 4),
+        }
+```
+
+Adjust the backend constructor arguments to match your turboquant-core version. The `prepare_model` call receives the full `policy_cfg` dict, so all `settings:` keys from the YAML are available.

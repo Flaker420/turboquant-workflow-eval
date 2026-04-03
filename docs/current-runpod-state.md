@@ -11,6 +11,11 @@ This repository has been validated on a RunPod environment with the following ef
 - `flash-linear-attention` importable through the `fla` namespace
 - `causal_conv1d` importable
 
+## Supported models
+
+- **Qwen3.5-9B** -- primary validated model (hybrid architecture)
+- **Qwen3-8B** -- also supported via `configs/model/qwen3_8b.yaml` (dense attention)
+
 ## Important caveat
 
 The Qwen 3.5 Transformers implementation may still emit:

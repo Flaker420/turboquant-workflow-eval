@@ -10,11 +10,11 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from qwen35_turboquant_workflow_study.config import load_yaml
-from qwen35_turboquant_workflow_study.model_loader import load_model_and_tokenizer, resolve_language_model_root
-from qwen35_turboquant_workflow_study.module_discovery import discover_attention_blocks
-from qwen35_turboquant_workflow_study.preflight import run_preflight
-from qwen35_turboquant_workflow_study.prompts import load_prompt_source
+from turboquant_workflow_eval.config import load_yaml
+from turboquant_workflow_eval.model_loader import load_model_and_tokenizer, resolve_language_model_root
+from turboquant_workflow_eval.module_discovery import discover_attention_blocks
+from turboquant_workflow_eval.preflight import run_preflight
+from turboquant_workflow_eval.prompts import load_prompt_source
 
 
 def main() -> None:

@@ -15,7 +15,7 @@ Options:
 
 Environment overrides:
   WORKSPACE_ROOT     Default: /workspace
-  VENV_DIR           Default: /workspace/venvs/qwen35-turboquant-study
+  VENV_DIR           Default: /workspace/venvs/turboquant-eval
   CACHE_ROOT         Default: /workspace/.cache/huggingface
   OUTPUT_ROOT        Default: /workspace/outputs
 EOF
@@ -65,7 +65,7 @@ if [[ "$TOKENIZER_ONLY" -eq 1 && "$DOWNLOAD_MODEL" -ne 1 ]]; then
 fi
 
 WORKSPACE_ROOT="${WORKSPACE_ROOT:-/workspace}"
-VENV_DIR="${VENV_DIR:-${WORKSPACE_ROOT}/venvs/qwen35-turboquant-study}"
+VENV_DIR="${VENV_DIR:-${WORKSPACE_ROOT}/venvs/turboquant-eval}"
 CACHE_ROOT="${CACHE_ROOT:-${WORKSPACE_ROOT}/.cache/huggingface}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-${WORKSPACE_ROOT}/outputs}"
 

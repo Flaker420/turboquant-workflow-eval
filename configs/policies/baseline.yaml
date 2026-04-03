@@ -2,7 +2,7 @@ name: baseline
 enabled: true
 comparison_label: baseline
 adapter:
-  import_path: qwen35_turboquant_workflow_study.adapters.none:NoCompressionAdapter
+  import_path: turboquant_workflow_eval.adapters.none:NoCompressionAdapter
 settings: {}
 notes:
   - Pass-through baseline for workflow comparison.

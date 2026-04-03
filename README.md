@@ -1,16 +1,25 @@
-# Qwen3.5-9B TurboQuant Workflow Study
+# TurboQuant Workflow Evaluation
 
-A practical, **RunPod-first** repository for answering a practical question:
+A practical, **RunPod-first** evaluation harness for answering a simple question:
 
 > Which compression policy is usable in my workflow, and what breaks when I push it harder?
 
-This repository is **not** a paper-style ablation project. It is a compact evaluation harness for **Qwen3.5-9B**, with:
+This repository is the evaluation counterpart to [turboquant-core](https://github.com/Flaker420/turboquant-core), the TurboQuant KV-cache compression library. It is **not** a paper-style ablation project. It is a compact harness with:
 
 - model discovery and preflight instrumentation
 - a fixed prompt pack for reasoning, math, coding, and retrieval
 - reproducible CSV / JSONL / Markdown outputs
-- a pluggable adapter interface for integrating a real TurboQuant backend
+- a pluggable adapter interface for integrating TurboQuant backends
 - RunPod-oriented bootstrap and storage conventions
+
+## Supported models
+
+| Model | Config | turboquant-core backend |
+|-------|--------|------------------------|
+| Qwen3.5-9B | `configs/model/qwen35_9b_text_only.yaml` | `Qwen35KVBackend` |
+| Qwen3-8B | `configs/model/qwen3_8b.yaml` | `Qwen3DenseKVBackend` |
+
+Both models work with the same evaluation pipeline. Select the model by passing a different `--model-config` to the scripts or by editing the study/experiment config.
 
 ## Ready-to-run status
 
@@ -21,7 +30,7 @@ The scaffold is **ready to run** for:
 - preflight instrumentation
 - baseline workflow study
 
-It now includes a **local Transformers-side patch adapter** for a conservative full-attention-only workflow comparison. This adapter is a behavioral proxy that quantizes K/V projection outputs in the 8 full-attention layers. It is useful for practical evaluation, but it does **not** claim true KV-cache memory savings.
+It includes a **pluggable adapter interface** and disabled template configs (`safe_template.yaml`, `aggressive_template.yaml`) for wiring a real compression backend from [turboquant-core](https://github.com/Flaker420/turboquant-core). These templates point to a stub adapter that raises an error until you replace the import path with your own backend class.
 
 ## What is built in
 
@@ -29,7 +38,7 @@ Built in and ready to run:
 
 - RunPod bootstrap with optional cache warmup
 - environment validation
-- Qwen3.5-9B model loading helpers
+- model loading helpers (any HuggingFace model via config)
 - language-model root discovery
 - attention-block discovery
 - Q / K / V projection capture for preflight checks
@@ -39,13 +48,24 @@ Built in and ready to run:
 
 ## What you still need to wire
 
-This repository does **not** pretend to ship a production TurboQuant kernel.
+This repository does **not** ship a production TurboQuant kernel.
 
 What is included now:
-- a pass-through baseline adapter
-- a local Transformers-side safe adapter for conservative full-attention-only comparison
+- a pass-through baseline adapter (runs the model with no compression)
+- stub-backed safe and aggressive policy templates (disabled by default; wire a real backend to enable)
 
-If you later add a true TurboQuant backend, you can still point the policies at a different adapter class. The adapter interface is intentionally small and documented in `docs/adapter-interface.md`.
+To test real compression, install [turboquant-core](https://github.com/Flaker420/turboquant-core), write an adapter class, and point a policy config at it. See `docs/adapter-interface.md` for the full contract.
+
+## Wiring turboquant-core
+
+This evaluation harness is designed to work with [turboquant-core](https://github.com/Flaker420/turboquant-core). To wire it:
+
+1. Install turboquant-core in the same environment.
+2. Write an adapter class that calls `Qwen35KVBackend` (for Qwen3.5-9B) or `Qwen3DenseKVBackend` (for Qwen3-8B) inside `prepare_model`.
+3. Set the adapter's `import_path` in `safe_template.yaml` or `aggressive_template.yaml`.
+4. Set `enabled: true` in the policy config.
+
+See `docs/adapter-interface.md` for the full adapter contract and a concrete example.
 
 ## RunPod-first design
 
@@ -53,7 +73,7 @@ The default scripts assume a **network volume mounted at `/workspace`** and keep
 
 Recommended directories on the mounted volume:
 
-- `/workspace/venvs/qwen35-turboquant-study`
+- `/workspace/venvs/turboquant-eval`
 - `/workspace/.cache/huggingface`
 - `/workspace/outputs`
 
@@ -77,7 +97,7 @@ Install the validated RunPod environment only:
 ```bash
 bash scripts/bootstrap_runpod.sh
 source .env.runpod
-source /workspace/venvs/qwen35-turboquant-study/bin/activate
+source /workspace/venvs/turboquant-eval/bin/activate
 ```
 
 Install the validated environment and warm the model cache:
@@ -85,7 +105,7 @@ Install the validated environment and warm the model cache:
 ```bash
 bash scripts/bootstrap_runpod.sh --download-model
 source .env.runpod
-source /workspace/venvs/qwen35-turboquant-study/bin/activate
+source /workspace/venvs/turboquant-eval/bin/activate
 ```
 
 Install the validated environment and attempt the optional fast-path packages:
@@ -93,7 +113,13 @@ Install the validated environment and attempt the optional fast-path packages:
 ```bash
 bash scripts/bootstrap_runpod.sh --download-model --fast-path
 source .env.runpod
-source /workspace/venvs/qwen35-turboquant-study/bin/activate
+source /workspace/venvs/turboquant-eval/bin/activate
+```
+
+To use Qwen3-8B instead of the default Qwen3.5-9B:
+
+```bash
+bash scripts/bootstrap_runpod.sh --download-model --model-config configs/model/qwen3_8b.yaml
 ```
 
 ### 2) Validate the scaffold
@@ -123,7 +149,7 @@ Baseline only:
 make study POLICY_CONFIGS=configs/policies/baseline.yaml OUTPUT_DIR=outputs/study_baseline
 ```
 
-Baseline plus the built-in safe policy:
+Baseline plus the built-in safe policy (after wiring a real backend):
 
 ```bash
 make study \
@@ -192,19 +218,19 @@ For each policy you test, the repo produces concrete artifacts you can compare:
 - `workflow_compare.csv`
 - `rows.jsonl`
 - `examples.md`
-- per-prompt text files
+- per-prompt text files in `text_outputs/`
 - `run_summary.json`
 
 That gives you a direct **works / degrades / fails** view instead of a research-heavy sweep.
 
 ## Repository layout
 
-- `configs/` – model, policy, and study configs
-- `docs/` – architecture facts, scope, RunPod setup, manual runbook, and adapter contract
-- `prompts/` – fixed workflow prompt pack
-- `scripts/` – RunPod bootstrap and entrypoints
-- `src/` – reusable package code
-- `tests/` – scaffold tests
+- `configs/` -- model, policy, and study configs
+- `docs/` -- architecture facts, scope, RunPod setup, manual runbook, and adapter contract
+- `prompts/` -- fixed workflow prompt pack
+- `scripts/` -- RunPod bootstrap and entrypoints
+- `src/` -- reusable package code
+- `tests/` -- scaffold tests
 
 ## Recommended first decision path
 
@@ -219,7 +245,6 @@ Do not start with a large sweep.
 
 This repository is intentionally opinionated:
 
-- freeze the Qwen3.5 architecture priors
 - vary compression **policy**, not model architecture
 - optimize for **workflow decisions**, not paper completeness
-- treat the built-in local patch as a practical proxy, not as proof of TurboQuant-equivalent memory compression
+- the safe and aggressive templates are stubs; wire [turboquant-core](https://github.com/Flaker420/turboquant-core) or your own backend to produce real compression comparisons
