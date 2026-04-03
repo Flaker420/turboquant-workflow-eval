@@ -10,6 +10,7 @@ This repository is the evaluation counterpart to [turboquant-core](https://githu
 - a fixed prompt pack for reasoning, math, coding, and retrieval
 - reproducible CSV / JSONL / Markdown outputs
 - a pluggable adapter interface for integrating TurboQuant backends
+- a Gradio web UI for interactive workflow execution
 - RunPod-oriented bootstrap and storage conventions
 
 ## Supported models
@@ -44,6 +45,7 @@ Built in and ready to run:
 - Q / K / V projection capture for preflight checks
 - baseline pass-through adapter
 - workflow study runner and report generation
+- Gradio web UI (`app.py`) for browser-based interaction
 - unit tests for the scaffold
 
 ## What you still need to wire
@@ -122,6 +124,12 @@ To use Qwen3-8B instead of the default Qwen3.5-9B:
 bash scripts/bootstrap_runpod.sh --download-model --model-config configs/model/qwen3_8b.yaml
 ```
 
+Alternatively, after bootstrapping, launch the web UI to run the entire workflow from your browser:
+
+```bash
+make ui
+```
+
 ### 2) Validate the scaffold
 
 ```bash
@@ -159,6 +167,36 @@ make study \
 
 After that, you can optionally enable the aggressive template for a second-pass stress comparison.
 
+## Web UI (Gradio)
+
+The repository includes a browser-based Gradio UI that covers the full workflow. This is especially useful on RunPod, where you can access it through the pod's exposed port.
+
+### Launching the UI
+
+```bash
+make ui
+```
+
+Or directly:
+
+```bash
+python app.py
+```
+
+The UI starts on `http://0.0.0.0:7860`. On RunPod, access it through your pod's proxy URL at port 7860.
+
+### UI tabs
+
+| Tab | Purpose |
+|-----|---------|
+| **Environment** | Validate CUDA/torch setup, check HuggingFace cache, download models |
+| **Model Inspection** | Load a model into memory, discover and inspect attention blocks |
+| **Preflight** | Run Q/K/V tensor statistics on loaded model, view results as JSON |
+| **Study Runner** | Select study and policy configs, run a full workflow study, view summary |
+| **Results** | Browse completed study outputs: comparison table, per-prompt text, run metadata |
+
+The UI calls the same Python library functions as the CLI scripts. A model loaded in the Model Inspection tab stays in memory and is reused by the Preflight tab.
+
 ## Manual step-by-step path
 
 The manual runbook is in:
@@ -168,6 +206,14 @@ The manual runbook is in:
 That document includes each step separately plus the parameters for each script.
 
 ## Script usage summary
+
+### `app.py` (Gradio UI)
+
+```bash
+python app.py
+```
+
+Launches the web UI on port 7860. See the [Web UI](#web-ui-gradio) section above.
 
 ### `scripts/bootstrap_runpod.sh`
 
@@ -225,6 +271,7 @@ That gives you a direct **works / degrades / fails** view instead of a research-
 
 ## Repository layout
 
+- `app.py` -- Gradio web UI (launch with `make ui`)
 - `configs/` -- model, policy, and study configs
 - `docs/` -- architecture facts, scope, RunPod setup, manual runbook, and adapter contract
 - `prompts/` -- fixed workflow prompt pack

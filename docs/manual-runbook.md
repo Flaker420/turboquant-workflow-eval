@@ -2,6 +2,8 @@
 
 This document is the step-by-step path for running the repository manually on RunPod.
 
+> **Alternative:** Instead of following the CLI steps below, you can run `make ui` after setting up the environment (steps 1-2) to use the Gradio web UI at `http://0.0.0.0:7860`. The UI covers steps 3-8 interactively.
+
 ## 1. Create the environment
 
 ```bash
