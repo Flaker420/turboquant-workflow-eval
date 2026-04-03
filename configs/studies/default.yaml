@@ -1,4 +1,4 @@
-name: qwen35_turboquant_workflow_study
+name: turboquant_workflow_eval
 model_config: ../model/qwen35_9b_text_only.yaml
 prompt_pack: ../../prompts/workflow_prompts.yaml
 policy_configs:

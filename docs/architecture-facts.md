@@ -1,26 +1,30 @@
-# Architecture facts to keep fixed
+# Architecture facts
 
-This study is intentionally **not** exploring Qwen3.5-9B architecture design space.
+This document records the frozen architecture priors for each supported model. The evaluation harness treats these as fixed -- it studies **compression policy**, not architecture design.
 
-The following are treated as **frozen priors** for the workflow study:
+## Qwen3.5-9B (hybrid)
 
 - 32 language-model layers
-- hidden schedule: 8 × (3 × Gated DeltaNet + 1 × Gated Attention)
+- hidden schedule: 8 x (3 x Gated DeltaNet + 1 x Gated Attention)
 - one full-attention layer every 4 layers
 - linear-attention convolution kernel = 4
 - linear key head dimension = 128
 - linear value head dimension = 128
 - linear key-head count = 16
-- for Qwen3.5-9B specifically, linear value-head count = 32
+- linear value-head count = 32
 
-The implication is simple:
+TurboQuant-core backend: `Qwen35KVBackend` -- compresses 8 full-attention layers while leaving DeltaNet layers unchanged. Keys use TQ_prod quantization, values use TQ_MSE.
 
-- do **not** spend time tuning the DeltaNet architecture
-- do **not** treat the 3:1 schedule as a first-pass knob
-- do focus on **compression policy**, memory, latency, and output quality
+## Qwen3-8B (dense)
 
-This repository studies:
+- 36 language-model layers
+- all layers use standard attention (no DeltaNet)
 
-- what works in a real workflow
-- what fails under conservative and aggressive compression policies
-- where the practical cliff appears
+TurboQuant-core backend: `Qwen3DenseKVBackend` -- applies compression uniformly across all 36 layers. Keys use TQ_prod quantization, values use TQ_MSE.
+
+## What this means for the evaluation
+
+- Do **not** spend time tuning architecture internals
+- Do **not** treat the layer schedule as a first-pass knob
+- Do focus on **compression policy**, memory, latency, and output quality
+- The evaluation harness studies what works in a real workflow and where the practical cliff appears

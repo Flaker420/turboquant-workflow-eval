@@ -2,7 +2,7 @@ name: turboquant_aggressive
 enabled: false
 comparison_label: aggressive
 adapter:
-  import_path: qwen35_turboquant_workflow_study.adapters.external_stub:ExternalCompressionAdapterStub
+  import_path: turboquant_workflow_eval.adapters.external_stub:ExternalCompressionAdapterStub
 settings:
   backend_label: replace_with_real_backend
   scope: full_attention_only

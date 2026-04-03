@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from qwen35_turboquant_workflow_study.prompts import load_prompt_pack
+from turboquant_workflow_eval.prompts import load_prompt_pack
 
 
 def test_load_prompt_pack(tmp_path: Path) -> None:

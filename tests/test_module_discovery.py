@@ -1,6 +1,6 @@
 import torch.nn as nn
 
-from qwen35_turboquant_workflow_study.module_discovery import discover_attention_blocks
+from turboquant_workflow_eval.module_discovery import discover_attention_blocks
 
 
 class FakeAttention(nn.Module):

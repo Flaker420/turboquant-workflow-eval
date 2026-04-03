@@ -21,7 +21,7 @@ Use the bootstrap script or the manual runbook exactly as written so the torch b
 ## Suggested layout
 
 - repository: `/workspace/<repo-name>`
-- virtual environment: `/workspace/venvs/qwen35-turboquant-study`
+- virtual environment: `/workspace/venvs/turboquant-eval`
 - Hugging Face cache: `/workspace/.cache/huggingface`
 - outputs: `/workspace/outputs`
 
@@ -32,7 +32,7 @@ Base environment only:
 ```bash
 bash scripts/bootstrap_runpod.sh
 source .env.runpod
-source /workspace/venvs/qwen35-turboquant-study/bin/activate
+source /workspace/venvs/turboquant-eval/bin/activate
 ```
 
 Base environment + model cache warmup:
@@ -40,7 +40,7 @@ Base environment + model cache warmup:
 ```bash
 bash scripts/bootstrap_runpod.sh --download-model
 source .env.runpod
-source /workspace/venvs/qwen35-turboquant-study/bin/activate
+source /workspace/venvs/turboquant-eval/bin/activate
 ```
 
 Base environment + optional fast-path package attempt:
@@ -48,7 +48,7 @@ Base environment + optional fast-path package attempt:
 ```bash
 bash scripts/bootstrap_runpod.sh --download-model --fast-path
 source .env.runpod
-source /workspace/venvs/qwen35-turboquant-study/bin/activate
+source /workspace/venvs/turboquant-eval/bin/activate
 ```
 
 ## Manual setup

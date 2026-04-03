@@ -10,13 +10,13 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from qwen35_turboquant_workflow_study.config import load_yaml
-from qwen35_turboquant_workflow_study.model_loader import load_model_and_tokenizer, resolve_language_model_root
-from qwen35_turboquant_workflow_study.module_discovery import discover_attention_blocks
+from turboquant_workflow_eval.config import load_yaml
+from turboquant_workflow_eval.model_loader import load_model_and_tokenizer, resolve_language_model_root
+from turboquant_workflow_eval.module_discovery import discover_attention_blocks
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="List discovered attention blocks for Qwen3.5-9B.")
+    parser = argparse.ArgumentParser(description="List discovered attention blocks for the configured model.")
     parser.add_argument("--model-config", default="configs/model/qwen35_9b_text_only.yaml")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
