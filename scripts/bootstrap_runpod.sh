@@ -7,10 +7,11 @@ Usage:
   bash scripts/bootstrap_runpod.sh [--download-model] [--tokenizer-only] [--fast-path] [--model-config PATH]
 
 Options:
-  --download-model   Warm the Hugging Face cache after installing dependencies.
-  --tokenizer-only   Only valid with --download-model. Cache tokenizer/config only.
+  --download-model   Warm the Hugging Face cache for the configured model.
+  --download-all     Download all models found in configs/model/.
+  --tokenizer-only   Only valid with --download-model/--download-all. Cache tokenizer/config only.
   --fast-path        Attempt optional fast-path packages after the base environment is ready.
-  --model-config     Model config to use for cache warmup.
+  --model-config     Model config to use for single-model cache warmup.
   -h, --help         Show this help message.
 
 Environment overrides:
@@ -25,6 +26,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 DOWNLOAD_MODEL=0
+DOWNLOAD_ALL=0
 TOKENIZER_ONLY=0
 FAST_PATH=0
 MODEL_CONFIG="configs/model/qwen35_9b_text_only.yaml"
@@ -33,6 +35,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --download-model)
       DOWNLOAD_MODEL=1
+      shift
+      ;;
+    --download-all)
+      DOWNLOAD_ALL=1
       shift
       ;;
     --tokenizer-only)
@@ -59,8 +65,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "$TOKENIZER_ONLY" -eq 1 && "$DOWNLOAD_MODEL" -ne 1 ]]; then
-  echo "--tokenizer-only requires --download-model" >&2
+if [[ "$TOKENIZER_ONLY" -eq 1 && "$DOWNLOAD_MODEL" -ne 1 && "$DOWNLOAD_ALL" -ne 1 ]]; then
+  echo "--tokenizer-only requires --download-model or --download-all" >&2
+  exit 2
+fi
+
+if [[ "$DOWNLOAD_MODEL" -eq 1 && "$DOWNLOAD_ALL" -eq 1 ]]; then
+  echo "--download-model and --download-all are mutually exclusive" >&2
   exit 2
 fi
 
@@ -92,7 +103,13 @@ EOF
 
 source "${REPO_DIR}/.env.runpod"
 
-if [[ "$DOWNLOAD_MODEL" -eq 1 ]]; then
+if [[ "$DOWNLOAD_ALL" -eq 1 ]]; then
+  DOWNLOAD_ARGS=(--all)
+  if [[ "$TOKENIZER_ONLY" -eq 1 ]]; then
+    DOWNLOAD_ARGS+=(--tokenizer-only)
+  fi
+  python "${REPO_DIR}/scripts/download_model.py" "${DOWNLOAD_ARGS[@]}"
+elif [[ "$DOWNLOAD_MODEL" -eq 1 ]]; then
   DOWNLOAD_ARGS=(--model-config "$MODEL_CONFIG")
   if [[ "$TOKENIZER_ONLY" -eq 1 ]]; then
     DOWNLOAD_ARGS+=(--tokenizer-only)
