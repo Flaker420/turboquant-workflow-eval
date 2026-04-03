@@ -1,0 +1,7 @@
+[
+  "tests/test_config.py::test_load_yaml_roundtrip",
+  "tests/test_module_discovery.py::test_discover_attention_blocks_filters_non_attention",
+  "tests/test_prompts.py::test_load_prompt_pack",
+  "tests/test_reporting.py::test_reporting_outputs",
+  "tests/test_reporting.py::test_slugify"
+]
