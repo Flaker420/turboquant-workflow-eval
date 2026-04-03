@@ -1,6 +1,6 @@
 # Qwen3.5-9B TurboQuant Workflow Study
 
-A professional, **RunPod-first** repository for answering a practical question:
+A practical, **RunPod-first** repository for answering a practical question:
 
 > Which compression policy is usable in my workflow, and what breaks when I push it harder?
 
