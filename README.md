@@ -172,7 +172,7 @@ That document includes each step separately plus the parameters for each script.
 ### `scripts/bootstrap_runpod.sh`
 
 ```bash
-bash scripts/bootstrap_runpod.sh [--download-model] [--tokenizer-only] [--fast-path] [--model-config PATH]
+bash scripts/bootstrap_runpod.sh [--download-model] [--download-all] [--tokenizer-only] [--fast-path] [--model-config PATH]
 ```
 
 Environment overrides:
@@ -190,7 +190,7 @@ python scripts/validate_environment.py
 ### `scripts/download_model.py`
 
 ```bash
-python scripts/download_model.py [--model-config PATH] [--tokenizer-only] [--output PATH]
+python scripts/download_model.py [--model-config PATH] [--all] [--check-only] [--tokenizer-only] [--skip-cached] [--max-retries N] [--output PATH]
 ```
 
 ### `scripts/list_attention_blocks.py`

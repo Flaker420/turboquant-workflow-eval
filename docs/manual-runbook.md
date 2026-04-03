@@ -39,13 +39,19 @@ python scripts/validate_environment.py
 
 ## 4. Warm the Hugging Face cache
 
-Model + tokenizer (Qwen3.5-9B, default):
+Download all configured models:
+
+```bash
+python scripts/download_model.py --all
+```
+
+Download a single model (Qwen3.5-9B, default):
 
 ```bash
 python scripts/download_model.py --model-config configs/model/qwen35_9b_text_only.yaml
 ```
 
-Model + tokenizer (Qwen3-8B):
+Download a single model (Qwen3-8B):
 
 ```bash
 python scripts/download_model.py --model-config configs/model/qwen3_8b.yaml
@@ -57,10 +63,21 @@ Tokenizer only:
 python scripts/download_model.py --model-config configs/model/qwen35_9b_text_only.yaml --tokenizer-only
 ```
 
-Optional parameters:
-- `--model-config PATH`
-- `--tokenizer-only`
-- `--output PATH`
+Check what is already cached:
+
+```bash
+python scripts/download_model.py --check-only
+```
+
+Parameters:
+- `--all` -- download all models in `configs/model/`
+- `--model-config PATH` -- single model config
+- `--check-only` -- show cache status without downloading
+- `--tokenizer-only` -- skip full model weights
+- `--skip-cached` / `--no-skip-cached` -- skip or force re-download of cached models
+- `--max-retries N` -- retry count on failure (default: 3)
+- `--fallback-tokenizer-only` / `--no-fallback` -- auto-fallback to tokenizer-only on model download failure
+- `--output PATH` -- write JSON summary
 
 ## 5. Run tests
 

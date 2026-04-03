@@ -8,13 +8,15 @@ POLICY_CONFIGS ?= configs/policies/baseline.yaml
 OUTPUT_DIR ?= outputs/study_run
 DOWNLOAD_OUTPUT ?= outputs/download_summary.json
 
-.PHONY: help test validate download-model list-attention preflight study
+.PHONY: help test validate download-model download-all check-cache list-attention preflight study
 
 help:
 	@printf "%s\n" \
 	  "make validate                    # Import check + CUDA visibility" \
 	  "make test                        # Run unit tests" \
 	  "make download-model             # Warm HF cache using MODEL_CONFIG" \
+	  "make download-all               # Download all models in configs/model/" \
+	  "make check-cache                # Check HF cache status for all models" \
 	  "make list-attention             # Discover attention blocks" \
 	  "make preflight                  # Run preflight instrumentation" \
 	  "make study POLICY_CONFIGS=...   # Run workflow study"
@@ -27,6 +29,12 @@ validate:
 
 download-model:
 	python scripts/download_model.py --model-config $(MODEL_CONFIG) --output $(DOWNLOAD_OUTPUT)
+
+download-all:
+	python scripts/download_model.py --all --output $(DOWNLOAD_OUTPUT)
+
+check-cache:
+	python scripts/download_model.py --check-only
 
 list-attention:
 	python scripts/list_attention_blocks.py --model-config $(MODEL_CONFIG)
