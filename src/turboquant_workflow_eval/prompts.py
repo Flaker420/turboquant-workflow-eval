@@ -20,7 +20,7 @@ def load_prompt_source(source: str, prompts_file: str | None = None, max_prompts
     elif source == "file":
         if not prompts_file:
             raise ValueError("prompts_file is required when source=file")
-        with open(prompts_file, "r", encoding="utf-8") as f:
+        with Path(prompts_file).open("r", encoding="utf-8") as f:
             prompts = [line.strip() for line in f if line.strip()]
     else:
         raise ValueError(f"Unsupported prompt source: {source}")

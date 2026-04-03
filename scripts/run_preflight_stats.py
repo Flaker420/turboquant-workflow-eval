@@ -10,7 +10,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from turboquant_workflow_eval.config import load_yaml
+from turboquant_workflow_eval.config import load_yaml, resolve_relative_path
 from turboquant_workflow_eval.model_loader import load_model_and_tokenizer, resolve_language_model_root
 from turboquant_workflow_eval.module_discovery import discover_attention_blocks
 from turboquant_workflow_eval.preflight import run_preflight
@@ -25,7 +25,7 @@ def main() -> None:
     args = parser.parse_args()
 
     exp_cfg = load_yaml(args.experiment_config)
-    model_cfg = load_yaml(exp_cfg["model_config"])
+    model_cfg = load_yaml(resolve_relative_path(args.experiment_config, exp_cfg["model_config"]))
 
     prompts = load_prompt_source(
         source=exp_cfg["prompts"]["source"],

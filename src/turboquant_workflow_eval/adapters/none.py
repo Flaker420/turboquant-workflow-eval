@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from typing import Any
+
 from .base import CompressionAdapter
 
 
 class NoCompressionAdapter(CompressionAdapter):
     name = "baseline-no-compression"
 
-    def prepare_model(self, model, tokenizer, model_cfg: dict, policy_cfg: dict):
+    def prepare_model(self, model: Any, tokenizer: Any, model_cfg: dict, policy_cfg: dict) -> tuple[Any, Any]:
         return model, tokenizer
 
     def describe(self, policy_cfg: dict) -> dict:

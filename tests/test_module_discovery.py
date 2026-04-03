@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import torch.nn as nn
 
 from turboquant_workflow_eval.module_discovery import discover_attention_blocks

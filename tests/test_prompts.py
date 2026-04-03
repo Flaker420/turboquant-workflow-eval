@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 from turboquant_workflow_eval.prompts import load_prompt_pack

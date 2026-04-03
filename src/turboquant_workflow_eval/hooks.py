@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from typing import Any
+
 from .stats import ProjectionTensorStats
+from .types import AttentionBlockRef
 
 
 class LayerCaptureStats:
@@ -18,7 +21,7 @@ class LayerCaptureStats:
 
 
 class ProjectionHookBook:
-    def __init__(self, attention_blocks) -> None:
+    def __init__(self, attention_blocks: list[AttentionBlockRef]) -> None:
         self._stats = {block.module_path: LayerCaptureStats() for block in attention_blocks}
 
     def update(self, block_path: str, kind: str, output) -> None:
@@ -30,7 +33,7 @@ class ProjectionHookBook:
 
 
 class ProjectionHookManager:
-    def __init__(self, model_root, attention_blocks, book: ProjectionHookBook) -> None:
+    def __init__(self, model_root: Any, attention_blocks: list[AttentionBlockRef], book: ProjectionHookBook) -> None:
         self.model_root = model_root
         self.attention_blocks = attention_blocks
         self.book = book
@@ -49,7 +52,7 @@ class ProjectionHookManager:
         )
         self.handles.append(handle)
 
-    def register(self):
+    def register(self) -> ProjectionHookManager:
         for block in self.attention_blocks:
             self._register_one(block, "q", block.q_proj_path)
             self._register_one(block, "k", block.k_proj_path)
@@ -60,7 +63,7 @@ class ProjectionHookManager:
         while self.handles:
             self.handles.pop().remove()
 
-    def __enter__(self):
+    def __enter__(self) -> ProjectionHookManager:
         return self.register()
 
     def __exit__(self, exc_type, exc, tb) -> None:

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 
 
-def resolve_torch_dtype(name: str):
+def resolve_torch_dtype(name: str) -> torch.dtype:
     mapping = {
         "bf16": torch.bfloat16,
         "bfloat16": torch.bfloat16,
@@ -31,7 +33,7 @@ def _build_model_kwargs(model_cfg: dict) -> dict:
     return kwargs
 
 
-def load_model_and_tokenizer(model_cfg: dict):
+def load_model_and_tokenizer(model_cfg: dict) -> tuple[Any, Any, str]:
     import transformers
 
     model_name = model_cfg["model_name"]
@@ -68,7 +70,7 @@ def load_model_and_tokenizer(model_cfg: dict):
     raise RuntimeError(f"Failed to load model {model_name}.\n{detail}")
 
 
-def resolve_language_model_root(model):
+def resolve_language_model_root(model: Any) -> Any:
     for attr in ("language_model", "model", "text_model"):
         candidate = getattr(model, attr, None)
         if candidate is not None and hasattr(candidate, "named_modules"):
@@ -76,7 +78,7 @@ def resolve_language_model_root(model):
     return model
 
 
-def infer_model_device(model) -> torch.device:
+def infer_model_device(model: Any) -> torch.device:
     try:
         return next(model.parameters()).device
     except StopIteration:

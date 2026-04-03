@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import time
+from typing import Any
 
 import torch
 
 from .model_loader import infer_model_device
 
 
-def render_prompt(tokenizer, prompt_text: str) -> str:
+def render_prompt(tokenizer: Any, prompt_text: str) -> str:
     chat_template = getattr(tokenizer, "chat_template", None)
     if chat_template:
         messages = [{"role": "user", "content": prompt_text}]
@@ -18,6 +19,7 @@ def render_prompt(tokenizer, prompt_text: str) -> str:
             enable_thinking=False,
         )
     return prompt_text
+
 
 def _peak_vram_gb(device) -> float | None:
     if device.type != "cuda":
@@ -30,7 +32,7 @@ def _reset_peak_vram(device) -> None:
         torch.cuda.reset_peak_memory_stats(device)
 
 
-def generate_one(model, tokenizer, prompt_text: str, runtime_cfg: dict) -> dict:
+def generate_one(model: Any, tokenizer: Any, prompt_text: str, runtime_cfg: dict) -> dict[str, Any]:
     model.eval()
     device = infer_model_device(model)
 
