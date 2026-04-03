@@ -1,7 +1,7 @@
 name: preflight_stats
 phase: 0
 description: Discovery and tensor-statistics pass before any compression work.
-model_config: configs/model/qwen35_9b_text_only.yaml
+model_config: ../model/qwen35_9b_text_only.yaml
 expected_attention_blocks: 8
 prompts:
   source: builtin

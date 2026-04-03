@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
+from typing import Any
 
 from .config import load_yaml
 
@@ -40,7 +41,7 @@ def check_cache_status(model_name: str, cache_dir: str | None = None) -> dict:
     return {"model_cached": False, "tokenizer_cached": False}
 
 
-def _download_tokenizer(model_cfg: dict):
+def _download_tokenizer(model_cfg: dict) -> dict[str, Any]:
     import transformers
 
     model_name = model_cfg["model_name"]
@@ -57,7 +58,7 @@ def _download_tokenizer(model_cfg: dict):
     }
 
 
-def _download_model_and_tokenizer(model_cfg: dict):
+def _download_model_and_tokenizer(model_cfg: dict) -> dict[str, Any]:
     from .model_loader import load_model_and_tokenizer
 
     model_name = model_cfg["model_name"]

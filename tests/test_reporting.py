@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 from turboquant_workflow_eval.reporting import slugify, write_csv, write_examples_markdown, write_jsonl

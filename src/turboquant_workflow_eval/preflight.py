@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 
 from .hooks import ProjectionHookBook, ProjectionHookManager
 from .model_loader import infer_model_device
+from .types import AttentionBlockRef
 
 
-def run_preflight(model, tokenizer, language_model_root, attention_blocks, prompts, max_length: int, use_cache: bool, loader_name: str) -> dict:
+def run_preflight(model: Any, tokenizer: Any, language_model_root: Any, attention_blocks: list[AttentionBlockRef], prompts: list[str], max_length: int, use_cache: bool, loader_name: str) -> dict:
     model.eval()
     device = infer_model_device(model)
     prompt_lengths: list[int] = []

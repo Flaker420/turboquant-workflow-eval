@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from math import sqrt
+from typing import Any
 
 import torch
 
@@ -14,7 +15,7 @@ class OnlineScalarStats:
     minimum: float | None = None
     maximum: float | None = None
 
-    def update(self, values) -> None:
+    def update(self, values: Any) -> None:
         tensor = values if torch.is_tensor(values) else torch.tensor([values], dtype=torch.float32)
         flat = tensor.detach().float().reshape(-1)
         if flat.numel() == 0:
@@ -87,7 +88,7 @@ class ProjectionTensorStats:
         }
 
 
-def take_first_tensor(output):
+def take_first_tensor(output: Any) -> torch.Tensor | None:
     if torch.is_tensor(output):
         return output
     if isinstance(output, (tuple, list)):

@@ -110,6 +110,8 @@ def write_examples_markdown(path: Path, rows: list[dict]) -> None:
             ]
         )
         for row in prompt_rows:
+            tps = row["tokens_per_second"]
+            vram = row["peak_vram_gb"]
             lines.extend(
                 [
                     f"### Policy: {row['policy_name']}",
@@ -118,8 +120,8 @@ def write_examples_markdown(path: Path, rows: list[dict]) -> None:
                     f"- Prompt tokens: {row['prompt_tokens']}",
                     f"- Output tokens: {row['output_tokens']}",
                     f"- Latency (s): {row['latency_s']:.4f}",
-                    "- Tokens/sec: {}".format("n/a" if row["tokens_per_second"] is None else "{:.4f}".format(row["tokens_per_second"])),
-                    "- Peak VRAM (GB): {}".format("n/a" if row["peak_vram_gb"] is None else "{:.4f}".format(row["peak_vram_gb"])),
+                    f"- Tokens/sec: {'n/a' if tps is None else f'{tps:.4f}'}",
+                    f"- Peak VRAM (GB): {'n/a' if vram is None else f'{vram:.4f}'}",
                     "",
                     "```text",
                     row["output_text"] or "",

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from .constants import (
     ATTENTION_EXCLUDE_HINTS,
     ATTENTION_NAME_HINTS,
@@ -20,14 +22,14 @@ def _contains_any(text: str, needles: tuple[str, ...]) -> bool:
     return any(needle in text for needle in needles)
 
 
-def _looks_attention_like(module_path: str, module) -> bool:
+def _looks_attention_like(module_path: str, module: Any) -> bool:
     joined = f"{module_path} {module.__class__.__name__}"
     if _contains_any(joined, ATTENTION_EXCLUDE_HINTS):
         return False
     return _contains_any(joined, ATTENTION_NAME_HINTS)
 
 
-def _projection_child_map(module) -> dict[str, str]:
+def _projection_child_map(module: Any) -> dict[str, str]:
     mapping: dict[str, str] = {}
     for child_name, _child in module.named_children():
         name = _norm(child_name)
@@ -42,7 +44,7 @@ def _projection_child_map(module) -> dict[str, str]:
     return mapping
 
 
-def discover_attention_blocks(model_root, expected_count: int | None = None) -> list[AttentionBlockRef]:
+def discover_attention_blocks(model_root: Any, expected_count: int | None = None) -> list[AttentionBlockRef]:
     candidates = []
     for module_path, module in model_root.named_modules():
         if not module_path:
