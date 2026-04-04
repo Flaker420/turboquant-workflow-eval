@@ -121,7 +121,7 @@ python scripts/run_workflow_study.py \
   --output-dir outputs/study_baseline
 ```
 
-Baseline + safe policy (after wiring a real backend):
+Baseline + safe policy:
 
 ```bash
 python scripts/run_workflow_study.py \
