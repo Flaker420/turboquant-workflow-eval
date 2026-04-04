@@ -10,10 +10,23 @@ The repository ships with a **baseline pass-through adapter** and a **TurboQuant
 
 Your class should inherit from `CompressionAdapter` and implement:
 
+### Required methods
+
 - `name` -- human-readable adapter name
 - `prepare_model(model, tokenizer, model_cfg, policy_cfg)` -- return the prepared model and tokenizer
 - `describe(policy_cfg)` -- return a small dictionary for metadata
 - `cleanup(model)` -- optional teardown
+
+### Optional methods (model reuse and inspection)
+
+These methods enable the study runner to reuse a single model across multiple policies instead of reloading from scratch each time. All have safe default implementations in the base class -- existing adapters continue to work without changes.
+
+- `can_revert() -> bool` -- return `True` if `revert()` can undo `prepare_model()` in-place. Default: `True`
+- `revert(model) -> bool` -- undo the changes made by `prepare_model()`. Return `True` if the model is clean and reusable, `False` if a full reload is needed. Default: no-op, returns `True`
+- `get_state() -> dict` -- return current compression parameters for inspection (used by the Quick Test UI tab). Default: empty dict
+- `update_params(params) -> bool` -- hot-update compression params without full revert + reapply. Return `True` if applied, `False` if not supported. Default: returns `False`
+
+When `can_revert()` returns `True`, the study runner loads the model once and calls `prepare_model()` / `revert()` for each policy. When it returns `False`, the model is reloaded from scratch before each policy.
 
 ## Minimal example
 
@@ -25,6 +38,7 @@ class MyTurboQuantAdapter(CompressionAdapter):
 
     def prepare_model(self, model, tokenizer, model_cfg, policy_cfg):
         # apply your compression backend here
+        self._original_weights = save_weights(model)  # for revert
         return model, tokenizer
 
     def describe(self, policy_cfg):
@@ -32,6 +46,16 @@ class MyTurboQuantAdapter(CompressionAdapter):
             "backend": "custom",
             "policy": policy_cfg.get("name"),
         }
+
+    def can_revert(self):
+        return True
+
+    def revert(self, model):
+        restore_weights(model, self._original_weights)
+        return True
+
+    def get_state(self):
+        return {"backend": "custom", "bit_width": 4}
 ```
 
 ## Policy config example

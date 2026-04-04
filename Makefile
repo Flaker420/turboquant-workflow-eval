@@ -7,8 +7,9 @@ STUDY_CONFIG ?= configs/studies/default.yaml
 POLICY_CONFIGS ?= configs/policies/baseline.yaml
 OUTPUT_DIR ?= outputs/study_run
 DOWNLOAD_OUTPUT ?= outputs/download_summary.json
+RESCORE_INPUT ?= $(OUTPUT_DIR)/rows.jsonl
 
-.PHONY: help test validate download-model download-all check-cache list-attention preflight study study-full generate-prompts ui
+.PHONY: help test validate download-model download-all check-cache list-attention preflight dry-run smoke-test study study-full rescore generate-prompts ui
 
 help:
 	@printf "%s\n" \
@@ -19,8 +20,11 @@ help:
 	  "make check-cache                # Check HF cache status for all models" \
 	  "make list-attention             # Discover attention blocks" \
 	  "make preflight                  # Run preflight instrumentation" \
+	  "make dry-run                    # Validate configs without GPU (<1s)" \
+	  "make smoke-test                 # Quick single-prompt test" \
 	  "make study POLICY_CONFIGS=...   # Run workflow study" \
 	  "make study-full POLICY_CONFIGS=... # Run study with full prompt set" \
+	  "make rescore RESCORE_INPUT=...  # Re-score existing results (no GPU)" \
 	  "make generate-prompts           # Generate long-context prompts" \
 	  "make ui                         # Launch Gradio web UI"
 
@@ -45,11 +49,20 @@ list-attention:
 preflight:
 	python scripts/run_preflight_stats.py --experiment-config $(EXPERIMENT_CONFIG) --output-dir outputs/preflight_smoke
 
+dry-run:
+	python -m turboquant_workflow_eval --study-config $(STUDY_CONFIG) --dry-run
+
+smoke-test:
+	python -m turboquant_workflow_eval --study-config $(STUDY_CONFIG) --single --output-dir $(OUTPUT_DIR)
+
 study:
 	python scripts/run_workflow_study.py --study-config $(STUDY_CONFIG) --policy-configs $(POLICY_CONFIGS) --output-dir $(OUTPUT_DIR)
 
 study-full:
 	python scripts/run_workflow_study.py --study-config configs/studies/full.yaml --policy-configs $(POLICY_CONFIGS) --output-dir $(OUTPUT_DIR)
+
+rescore:
+	python -m turboquant_workflow_eval --rescore $(RESCORE_INPUT) --output-dir $(OUTPUT_DIR)
 
 generate-prompts:
 	python scripts/generate_prompts.py --model-config $(MODEL_CONFIG) --output prompts/generated_long_context.yaml

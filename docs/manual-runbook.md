@@ -87,7 +87,29 @@ Parameters:
 pytest -q
 ```
 
-## 6. List discovered attention blocks
+## 6. Dry-run validation (no GPU)
+
+Before committing GPU hours, verify all configs, file paths, and adapter imports resolve correctly:
+
+```bash
+python -m turboquant_workflow_eval --study-config configs/studies/default.yaml --dry-run
+```
+
+This runs in <1 second and prints an execution plan:
+
+```
+Study:       default_workflow_study
+Model:       Qwen/Qwen3.5-9B
+Policies:    3
+Prompts:     14
+Repetitions: 3
+Total gens:  126
+All configs valid. Ready to run.
+```
+
+You can combine `--dry-run` with prompt filtering and `--set` overrides to validate specific scenarios.
+
+## 7. List discovered attention blocks
 
 ```bash
 python scripts/list_attention_blocks.py --model-config configs/model/qwen35_9b_text_only.yaml
@@ -97,7 +119,7 @@ Optional parameters:
 - `--model-config PATH`
 - `--output PATH`
 
-## 7. Run preflight instrumentation
+## 8. Run preflight instrumentation
 
 ```bash
 python scripts/run_preflight_stats.py \
@@ -110,7 +132,19 @@ Optional parameters:
 - `--output-dir PATH`
 - `--prompts-file PATH`
 
-## 8. Run the workflow study
+## 9. Run the workflow study
+
+### Quick smoke test (one prompt, one policy)
+
+Before running the full matrix, verify that a single prompt works end-to-end:
+
+```bash
+python scripts/run_workflow_study.py \
+  --study-config configs/studies/default.yaml \
+  --single --prompt-id math_01
+```
+
+### Full study runs
 
 Baseline only:
 
@@ -130,12 +164,72 @@ python scripts/run_workflow_study.py \
   --output-dir outputs/study_compare
 ```
 
-Optional parameters:
+### CLI overrides (no YAML editing needed)
+
+Override runtime parameters directly from the command line:
+
+```bash
+python scripts/run_workflow_study.py \
+  --study-config configs/studies/default.yaml \
+  --set runtime.max_new_tokens=64 --repetitions 5
+```
+
+Run only coding prompts:
+
+```bash
+python scripts/run_workflow_study.py \
+  --study-config configs/studies/default.yaml \
+  --prompt-category coding
+```
+
+Filter prompts by regex:
+
+```bash
+python scripts/run_workflow_study.py \
+  --study-config configs/studies/default.yaml \
+  --prompt-filter "math|cagr"
+```
+
+### Parameters
 - `--study-config PATH`
 - `--policy-configs PATH1,PATH2,...`
+- `--model-config PATH`
 - `--output-dir PATH`
+- `--set KEY=VALUE` (repeatable, dot-notation)
+- `--repetitions N`
+- `--prompt-id ID` (repeatable)
+- `--prompt-category CAT` (repeatable)
+- `--prompt-filter REGEX`
+- `--single`
+- `--dry-run`
 
-## 9. Generate additional prompts (optional)
+### Notes
+
+- Results are written incrementally to `rows.jsonl` as each prompt completes. If the run crashes, partial results are preserved on disk.
+- The model is loaded once and reused across policies when the adapter supports `can_revert()`. This saves 30-60s per policy for a 9B model.
+
+## 10. Re-score existing results (no GPU)
+
+After reviewing study outputs, you can re-score with different thresholds without re-running inference:
+
+```bash
+python -m turboquant_workflow_eval \
+  --rescore outputs/study_compare/rows.jsonl \
+  --set thresholds.latency_red_pct=50
+```
+
+This recomputes verdicts on existing `rows.jsonl` and rewrites the CSV and markdown files. The Gradio UI also has a **Re-Score** tab with threshold sliders for interactive tuning.
+
+Per-category thresholds are supported:
+
+```bash
+python -m turboquant_workflow_eval \
+  --rescore outputs/study_compare/rows.jsonl \
+  --set thresholds.default.latency_red_pct=25 \
+  --set thresholds.math.latency_red_pct=50
+```
+
+## 11. Generate additional prompts (optional)
 
 Generate long-context evaluation prompts using the target model:
 
@@ -153,7 +247,7 @@ Optional parameters:
 
 The generated YAML follows the same schema as the fixed prompt pack. To use it in a study, pass `configs/studies/full.yaml` as the study config (which references both the fixed and generated prompt packs) or use `make study-full`.
 
-## 10. Expected outputs
+## 12. Expected outputs
 
 Workflow study outputs:
 - `workflow_compare.csv`
