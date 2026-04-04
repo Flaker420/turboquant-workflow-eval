@@ -43,13 +43,21 @@ Built in and ready to run:
 - language-model root discovery
 - attention-block discovery
 - Q / K / V projection capture for preflight checks
-- baseline pass-through adapter
-- workflow study runner and report generation
+- baseline pass-through adapter with revert support for model reuse
+- composable study runner (`prepare_study` / `run_policy` / `score_results` / `write_results`)
 - automated quality scoring (math reference checking, code execution, semantic similarity)
-- configurable green/yellow/red verdict system with per-prompt verdicts
+- configurable green/yellow/red verdict system with per-prompt and per-category verdicts
 - repetition support with mean/std aggregation for stable benchmarking
 - prompt generation script for long-context evaluation prompts
-- Gradio web UI (`app.py`) for browser-based interaction
+- Gradio web UI (`app.py`) with 8 tabs for interactive workflow execution
+- `--dry-run` validation without GPU (validates configs, paths, adapters in <1 second)
+- `--single` smoke-test mode (one prompt, one policy, one repetition)
+- `--set key=value` CLI config overrides with dot-notation (e.g. `--set runtime.max_new_tokens=128`)
+- prompt filtering from CLI (`--prompt-id`, `--prompt-category`, `--prompt-filter`)
+- `--rescore` existing results with new thresholds (no GPU, pure computation)
+- event-driven study loop with pause/resume/stop and configurable early stopping
+- incremental JSONL output (partial results survive crashes)
+- environment variable expansion in YAML configs (`${VAR:-default}`)
 - unit tests for the scaffold
 
 ## What is wired
@@ -136,19 +144,45 @@ python scripts/validate_environment.py
 pytest -q
 ```
 
-### 3) Inspect the discovered attention blocks
+### 3) Dry-run to validate configs (no GPU)
+
+Before committing GPU hours, verify that all configs, paths, and adapters resolve correctly:
+
+```bash
+python -m turboquant_workflow_eval --study-config configs/studies/default.yaml --dry-run
+```
+
+This runs in <1 second and prints an execution plan showing how many prompts, policies, and total generations would run.
+
+### 4) Inspect the discovered attention blocks
 
 ```bash
 make list-attention
 ```
 
-### 4) Run the preflight instrumentation pass
+### 5) Run the preflight instrumentation pass
 
 ```bash
 make preflight
 ```
 
-### 5) Run the workflow study
+### 6) Smoke-test a single prompt (optional)
+
+Before running the full matrix, test one prompt end-to-end:
+
+```bash
+make smoke-test
+```
+
+Or with the CLI directly:
+
+```bash
+python -m turboquant_workflow_eval \
+  --study-config configs/studies/default.yaml \
+  --single --prompt-id math_01
+```
+
+### 7) Run the workflow study
 
 Baseline only:
 
@@ -191,10 +225,13 @@ The UI starts on `http://0.0.0.0:7860`. On RunPod, access it through your pod's 
 | **Environment** | Validate CUDA/torch setup, check HuggingFace cache, download models |
 | **Model Inspection** | Load a model into memory, discover and inspect attention blocks |
 | **Preflight** | Run Q/K/V tensor statistics on loaded model, view results as JSON |
-| **Study Runner** | Select study and policy configs, run a full workflow study, view summary |
+| **Study Runner** | Select study and policy configs, filter prompts, run study with pause/resume/stop controls, live verdict summary |
 | **Results** | Browse completed study outputs: comparison table, per-prompt text, run metadata |
+| **Quick Test** | Run a single prompt with parameter sliders (max tokens, temperature, repetitions), see instant results |
+| **Re-Score** | Adjust verdict thresholds with sliders and re-score existing results instantly (no GPU) |
+| **Comparison** | Side-by-side diff of two study runs with verdict highlighting |
 
-The UI calls the same Python library functions as the CLI scripts. A model loaded in the Model Inspection tab stays in memory and is reused by the Preflight tab.
+The UI calls the same Python library functions as the CLI scripts. A model loaded in the Model Inspection tab stays in memory and is reused by the Preflight and Quick Test tabs.
 
 ## Manual step-by-step path
 
@@ -253,7 +290,12 @@ python scripts/run_preflight_stats.py [--experiment-config PATH] [--output-dir P
 ### `scripts/run_workflow_study.py`
 
 ```bash
-python scripts/run_workflow_study.py [--study-config PATH] [--policy-configs PATH1,PATH2,...] [--output-dir PATH]
+python scripts/run_workflow_study.py \
+  [--study-config PATH] [--policy-configs PATH1,PATH2,...] [--output-dir PATH] \
+  [--model-config PATH] \
+  [--set KEY=VALUE] [--repetitions N] \
+  [--prompt-id ID] [--prompt-category CAT] [--prompt-filter REGEX] \
+  [--single] [--dry-run]
 ```
 
 ### `scripts/generate_prompts.py`
@@ -264,17 +306,62 @@ python scripts/generate_prompts.py [--model-config PATH] [--output PATH] [--max-
 
 Generates long-context evaluation prompts using the target model. The output YAML follows the same schema as `prompts/workflow_prompts.yaml` and can be used with `configs/studies/full.yaml`.
 
+## CLI quick reference
+
+The `python -m turboquant_workflow_eval` entry point (and `scripts/run_workflow_study.py`) supports these flags:
+
+| Flag | Description |
+|------|-------------|
+| `--study-config PATH` | Path to study YAML (required) |
+| `--output-dir PATH` | Output directory (default: `outputs/`) |
+| `--policy-configs P1,P2` | Override policy configs from study YAML |
+| `--model-config PATH` | Override model config from study YAML |
+| `--set KEY=VALUE` | Override any config value with dot-notation (repeatable) |
+| `--repetitions N` | Shorthand for `--set runtime.repetitions=N` |
+| `--prompt-id ID` | Run only this prompt (repeatable for multiple IDs) |
+| `--prompt-category CAT` | Run only prompts in this category (repeatable) |
+| `--prompt-filter REGEX` | Filter prompts by regex on id/title |
+| `--single` | Quick smoke test: 1st prompt, 1st policy, 1 rep |
+| `--dry-run` | Validate all configs without GPU (runs in <1s) |
+| `--rescore ROWS_JSONL` | Re-score existing results with new thresholds (no GPU) |
+
+### Common examples
+
+```bash
+# Validate before committing GPU hours
+python -m turboquant_workflow_eval --study-config configs/studies/default.yaml --dry-run
+
+# Quick smoke test with one math prompt
+python -m turboquant_workflow_eval --study-config configs/studies/default.yaml \
+  --single --prompt-id math_01
+
+# Override max tokens and repetitions from CLI
+python -m turboquant_workflow_eval --study-config configs/studies/default.yaml \
+  --set runtime.max_new_tokens=64 --repetitions 5
+
+# Run only coding prompts
+python -m turboquant_workflow_eval --study-config configs/studies/default.yaml \
+  --prompt-category coding
+
+# Re-score existing results with looser latency threshold
+python -m turboquant_workflow_eval \
+  --rescore outputs/study_run/rows.jsonl \
+  --set thresholds.latency_red_pct=50
+```
+
 ## Outputs
 
 For each policy you test, the repo produces concrete artifacts you can compare:
 
 - `workflow_compare.csv`
-- `rows.jsonl`
+- `rows.jsonl` (written incrementally -- partial results survive crashes)
 - `examples.md`
 - per-prompt text files in `text_outputs/`
 - `run_summary.json`
 
 That gives you a direct **works / degrades / fails** view instead of a research-heavy sweep.
+
+Results can be re-scored with different thresholds using `--rescore` without re-running inference.
 
 ## Repository layout
 
