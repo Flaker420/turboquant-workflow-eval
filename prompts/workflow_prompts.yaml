@@ -35,6 +35,7 @@ prompts:
     category: math
     title: CAGR walkthrough
     watch_for: correct numeric reasoning
+    reference_answer: "20.51"
     prompt: |
       A metric grows from 12 to 21 over 3 years.
       Compute the compound annual growth rate and show the steps clearly.
@@ -43,6 +44,7 @@ prompts:
     category: math
     title: weighted average
     watch_for: correct arithmetic
+    reference_answer: "86.2"
     prompt: |
       A model gets scores of 78, 84, and 91 on three tasks with weights 0.2, 0.3, and 0.5.
       Compute the weighted average and explain each multiplication.
@@ -58,6 +60,7 @@ prompts:
     category: math
     title: token budget estimate
     watch_for: simple, correct estimate
+    reference_answer: "2040"
     prompt: |
       Estimate the total number of generated tokens if 12 prompts each produce about 170 tokens on average.
       Show the arithmetic and give the final answer.
@@ -66,32 +69,52 @@ prompts:
     category: coding
     title: first duplicate helper
     watch_for: working Python and complexity note
+    test_cases:
+      - input: "[[1, 2, 3, 2]]"
+        expected: "2"
+      - input: "[[1, 2, 3]]"
+        expected: "None"
+      - input: "[['a', 'b', 'a']]"
+        expected: "a"
+      - input: "[[]]"
+        expected: "None"
     prompt: |
-      Write a Python function that returns the first repeated element in a list, or None if there is no repetition.
+      Write a Python function called first_duplicate that returns the first repeated element in a list, or None if there is no repetition.
       Include a short explanation of time complexity.
 
   - id: coding_02
     category: coding
     title: rolling mean
     watch_for: correct edge handling
+    test_cases:
+      - input: "[[1.0, 2.0, 3.0, 4.0, 5.0], 3]"
+        expected: "[2.0, 3.0, 4.0]"
+      - input: "[[10.0, 20.0], 1]"
+        expected: "[10.0, 20.0]"
     prompt: |
-      Write a Python function that computes a rolling mean for a list of floats given a window size.
+      Write a Python function called rolling_mean that computes a rolling mean for a list of floats given a window size.
       Handle invalid window sizes cleanly.
 
   - id: coding_03
     category: coding
     title: JSONL loader
     watch_for: clean code and practical safeguards
+    test_cases:
+      - input: "['tests/fixtures/good.jsonl']"
+        expected: "[{'a': 1}, {'b': 2}]"
     prompt: |
-      Write Python code to read a JSONL file and return a list of records.
+      Write a Python function called load_jsonl that reads a JSONL file path and returns a list of records.
       Ignore blank lines and raise a clear exception for malformed JSON.
 
   - id: coding_04
     category: coding
     title: adapter skeleton
     watch_for: class structure and clarity
+    test_cases:
+      - input: "[]"
+        expected: "hasattr"
     prompt: |
-      Write a minimal Python class skeleton for an adapter interface with methods prepare_model, describe, and cleanup.
+      Write a minimal Python class called CompressionAdapter with methods prepare_model, describe, and cleanup.
       Add short docstrings.
 
   - id: retrieval_01

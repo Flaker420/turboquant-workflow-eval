@@ -1,6 +1,8 @@
-name: turboquant_workflow_eval
+name: turboquant_workflow_eval_full
 model_config: ../model/qwen35_9b_text_only.yaml
-prompt_pack: ../../prompts/workflow_prompts.yaml
+prompt_pack:
+  - ../../prompts/workflow_prompts.yaml
+  - ../../prompts/generated_long_context.yaml
 policy_configs:
   - ../policies/baseline.yaml
   - ../policies/safe_template.yaml
@@ -14,7 +16,7 @@ runtime:
   use_cache: true
   cleanup_between_policies: true
   repetitions: 3
-  shuffle_policies: false
+  shuffle_policies: true
   shuffle_seed: 42
 thresholds:
   latency_yellow_pct: 10
