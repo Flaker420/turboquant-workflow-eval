@@ -25,8 +25,8 @@ On the validated RunPod environment, the system CUDA toolkit is 12.8. Installing
 ## 2. Optional fast-path packages
 
 ```bash
-python -m pip install -U flash-linear-attention
-python -m pip install -U causal-conv1d --no-build-isolation || true
+python -m pip install -U "flash-linear-attention @ git+https://github.com/fla-org/flash-linear-attention"
+python -m pip install causal-conv1d
 ```
 
 Notes:

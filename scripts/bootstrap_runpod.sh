@@ -97,8 +97,10 @@ python -m pip install -e "${REPO_DIR}[dev]"
 
 if [[ "$SKIP_FAST_PATH" -ne 1 ]]; then
   echo "Attempting fast-path packages (flash-linear-attention, causal-conv1d)..."
-  python -m pip install flash-linear-attention || echo "  flash-linear-attention: install failed (non-fatal)"
-  python -m pip install causal-conv1d --no-build-isolation || echo "  causal-conv1d: install failed (non-fatal)"
+  python -m pip install -U "flash-linear-attention @ git+https://github.com/fla-org/flash-linear-attention" || \
+    echo "  flash-linear-attention: install failed (non-fatal)"
+  python -m pip install causal-conv1d || \
+    echo "  causal-conv1d: install failed (non-fatal)"
 fi
 
 cat > "${REPO_DIR}/.env.runpod" <<EOF
