@@ -48,6 +48,12 @@ def run_code_with_tests(
 ) -> dict[str, Any]:
     """Execute *code* in a subprocess and test it against *test_cases*.
 
+    .. note:: Security boundary
+
+       Code is executed in an unsandboxed subprocess with only a *timeout*
+       guard.  This is acceptable on a single-user RunPod pod but should
+       **not** be exposed to untrusted users without additional isolation.
+
     Each test case has ``input`` (arguments as a Python literal) and
     ``expected`` (the expected repr of the return value).  The function
     name is inferred from the first ``def`` statement in *code*.

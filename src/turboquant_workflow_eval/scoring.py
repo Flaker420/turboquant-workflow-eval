@@ -59,6 +59,9 @@ def check_reference_answer(
     except (ValueError, AttributeError):
         return None
 
+    # Strategy: accept if *any* number in the output matches the reference.
+    # This tolerates intermediate-step numbers (e.g. "12, 21, 3 → 20.51")
+    # at the cost of possible false positives on number-heavy outputs.
     for num in extract_numbers(output_text):
         if ref_value == 0:
             if num == 0:

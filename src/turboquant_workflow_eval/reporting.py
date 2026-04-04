@@ -173,7 +173,8 @@ def write_examples_markdown(path: Path, rows: list[dict]) -> None:
                 lines.append(f"- Math correct: {'PASS' if mc else 'FAIL'}")
             cv = row.get("code_verdict")
             if cv:
-                lines.append(f"- Code verdict: {cv.upper()} ({row.get('code_passed', 0)}/{row.get('code_passed', 0) + row.get('code_failed', 0) + row.get('code_errors', 0)})")
+                code_total = row.get('code_passed', 0) + row.get('code_failed', 0) + row.get('code_errors', 0)
+                lines.append(f"- Code verdict: {cv.upper()} ({row.get('code_passed', 0)}/{code_total})")
             sim = row.get("semantic_similarity")
             if sim is not None:
                 lines.append(f"- Semantic similarity: {sim:.4f}")

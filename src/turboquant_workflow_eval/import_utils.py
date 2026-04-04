@@ -3,11 +3,8 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
-# Only allow adapter imports from these module prefixes.
-_ALLOWED_ADAPTER_PREFIXES = (
-    "turboquant_workflow_eval.adapters.",
-    "turboquant_workflow_eval.adapters:",
-)
+# Only allow adapter imports from this module prefix.
+_ALLOWED_ADAPTER_PREFIX = "turboquant_workflow_eval.adapters"
 
 
 def load_object(import_path: str, *, restrict_adapters: bool = True) -> Any:
@@ -22,9 +19,9 @@ def load_object(import_path: str, *, restrict_adapters: bool = True) -> Any:
     module_name, object_name = import_path.split(":", 1)
 
     if restrict_adapters:
-        if not module_name.startswith("turboquant_workflow_eval.adapters"):
+        if not module_name.startswith(_ALLOWED_ADAPTER_PREFIX):
             raise ValueError(
-                f"Adapter import path must start with 'turboquant_workflow_eval.adapters', "
+                f"Adapter import path must start with {_ALLOWED_ADAPTER_PREFIX!r}, "
                 f"got {module_name!r}. Set restrict_adapters=False to bypass."
             )
 

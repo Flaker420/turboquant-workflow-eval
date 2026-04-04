@@ -2,12 +2,14 @@ accelerate>=1.0
 numpy>=1.26
 packaging>=24.2
 pyyaml>=6.0.2
-pytest>=8.3
 transformers>=4.57.0
 gradio>=4.0
 
 # Optional: install for automated semantic similarity scoring (recommendation 7)
 # sentence-transformers>=2.0
+
+# Dev-only (not needed at runtime)
+# pytest>=8.3
 
 # Torch is installed separately on RunPod to match the system CUDA toolkit.
 # See scripts/bootstrap_runpod.sh and docs/manual-runbook.md.
