@@ -13,4 +13,4 @@ class CompressionAdapter:
         return {"adapter": self.name}
 
     def cleanup(self, model: Any) -> None:
-        return None
+        pass

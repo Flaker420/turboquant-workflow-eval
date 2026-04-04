@@ -4,6 +4,7 @@ comparison_label: aggressive
 adapter:
   import_path: turboquant_workflow_eval.adapters.external_stub:ExternalCompressionAdapterStub
 settings:
+  bit_width: 2
   backend_label: replace_with_real_backend
   scope: full_attention_only
   profile: aggressive

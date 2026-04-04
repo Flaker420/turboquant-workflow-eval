@@ -15,6 +15,11 @@ BUILTIN_PROMPTS = [
 
 
 def load_prompt_source(source: str, prompts_file: str | None = None, max_prompts: int | None = None) -> list[str]:
+    """Return plain-text prompts for lightweight operations like preflight warmup.
+
+    For full evaluation studies, use :func:`load_prompt_pack` instead, which
+    returns structured :class:`PromptSpec` objects with scoring metadata.
+    """
     if source == "builtin":
         prompts = list(BUILTIN_PROMPTS)
     elif source == "file":
@@ -30,6 +35,12 @@ def load_prompt_source(source: str, prompts_file: str | None = None, max_prompts
 
 
 def load_prompt_pack(path: str | Path) -> list[PromptSpec]:
+    path = Path(path)
+    if not path.exists():
+        hint = ""
+        if "generated" in path.name:
+            hint = " Run 'make generate-prompts' to create it first."
+        raise FileNotFoundError(f"Prompt pack not found: {path}.{hint}")
     data = load_yaml(path)
     raw_prompts = data.get("prompts", [])
     prompts: list[PromptSpec] = []
