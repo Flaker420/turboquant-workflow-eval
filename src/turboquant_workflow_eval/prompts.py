@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from .config import load_yaml
@@ -32,6 +33,30 @@ def load_prompt_source(source: str, prompts_file: str | None = None, max_prompts
     if max_prompts is not None:
         prompts = prompts[:max_prompts]
     return prompts
+
+
+def filter_prompts(
+    prompts: list[PromptSpec],
+    prompt_ids: list[str] | None = None,
+    categories: list[str] | None = None,
+    pattern: str | None = None,
+) -> list[PromptSpec]:
+    """Filter a prompt list by IDs, categories, and/or regex pattern.
+
+    All filters are combined with AND logic (a prompt must match all specified
+    filters).  Passing ``None`` for a filter disables it.
+    """
+    result = list(prompts)
+    if prompt_ids is not None:
+        id_set = set(prompt_ids)
+        result = [p for p in result if p.id in id_set]
+    if categories is not None:
+        cat_set = {c.lower() for c in categories}
+        result = [p for p in result if p.category.lower() in cat_set]
+    if pattern is not None:
+        regex = re.compile(pattern, re.IGNORECASE)
+        result = [p for p in result if regex.search(p.id) or regex.search(p.title)]
+    return result
 
 
 def load_prompt_pack(path: str | Path) -> list[PromptSpec]:

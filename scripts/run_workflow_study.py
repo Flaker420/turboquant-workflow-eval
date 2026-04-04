@@ -19,13 +19,54 @@ def main() -> None:
     parser.add_argument("--policy-configs", default=None, help="Comma-separated policy config paths.")
     parser.add_argument("--model-config", default=None, help="Override the model config from the study YAML.")
     parser.add_argument("--output-dir", default="outputs/study_run")
+
+    # Config overrides
+    parser.add_argument(
+        "--set", action="append", dest="overrides", metavar="KEY=VALUE", default=[],
+        help="Override any config value (e.g. --set runtime.max_new_tokens=128)",
+    )
+    parser.add_argument("--repetitions", type=int, default=None, help="Override repetition count")
+
+    # Prompt filtering
+    parser.add_argument("--prompt-id", action="append", dest="prompt_ids", default=None)
+    parser.add_argument("--prompt-category", action="append", dest="prompt_categories", default=None)
+    parser.add_argument("--prompt-filter", default=None, metavar="REGEX")
+
+    # Execution modes
+    parser.add_argument("--single", action="store_true", help="Quick smoke test: 1 prompt, 1 policy, 1 rep")
+    parser.add_argument("--dry-run", action="store_true", help="Validate configs without GPU")
+
     args = parser.parse_args()
+
+    if args.repetitions is not None:
+        args.overrides.append(f"runtime.repetitions={args.repetitions}")
+    if args.single:
+        args.overrides.append("runtime.repetitions=1")
+
+    if args.dry_run:
+        from turboquant_workflow_eval.validation import dry_run
+
+        exit_code = dry_run(
+            study_config_path=args.study_config,
+            overrides=args.overrides or None,
+            policy_configs_arg=args.policy_configs,
+            model_config_override=args.model_config,
+            prompt_ids=args.prompt_ids,
+            prompt_categories=args.prompt_categories,
+            prompt_pattern=args.prompt_filter,
+        )
+        sys.exit(exit_code)
 
     summary = run_workflow_study(
         study_config_path=args.study_config,
         output_dir=args.output_dir,
         policy_configs_arg=args.policy_configs,
         model_config_override=args.model_config,
+        config_overrides=args.overrides or None,
+        prompt_ids=args.prompt_ids,
+        prompt_categories=args.prompt_categories,
+        prompt_pattern=args.prompt_filter,
+        single_mode=args.single,
     )
     print(json.dumps(summary, indent=2))
 

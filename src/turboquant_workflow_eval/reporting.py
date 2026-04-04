@@ -193,3 +193,75 @@ def write_examples_markdown(path: Path, rows: list[dict]) -> None:
 
 def write_run_summary(path: Path, summary: dict) -> None:
     path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+
+
+class IncrementalWriter:
+    """Writes result rows to JSONL incrementally (one per prompt completion).
+
+    Partial results survive crashes — rows are flushed to disk after each
+    write.  Call :meth:`finalize` at the end to generate CSV, markdown, and
+    summary outputs from the accumulated rows.
+    """
+
+    def __init__(self, output_dir: Path) -> None:
+        self.output_dir = output_dir
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self._jsonl_path = output_dir / "rows.jsonl"
+        self._file = self._jsonl_path.open("w", encoding="utf-8")
+        self._rows: list[dict] = []
+
+    def write_row(self, row: dict) -> None:
+        """Append one result row immediately and flush to disk."""
+        self._rows.append(row)
+        self._file.write(json.dumps(row, ensure_ascii=False) + "\n")
+        self._file.flush()
+
+    def finalize(
+        self,
+        study_cfg: dict,
+        model_cfg: dict,
+        policies_used: list[dict],
+        prompt_count: int,
+        repetitions: int,
+        truncate_csv_output_to_chars: int = 180,
+        write_individual_text_files: bool = True,
+    ) -> dict:
+        """Write CSV, markdown, and summary.  Returns the summary dict."""
+        self._file.close()
+
+        rows = self._rows
+        write_csv(
+            self.output_dir / "workflow_compare.csv",
+            rows,
+            truncate_output_to_chars=truncate_csv_output_to_chars,
+        )
+        if write_individual_text_files:
+            write_text_outputs(self.output_dir, rows)
+        write_examples_markdown(self.output_dir / "examples.md", rows)
+
+        verdict_counts = {"green": 0, "yellow": 0, "red": 0}
+        for row in rows:
+            v = row.get("verdict", "green")
+            verdict_counts[v] = verdict_counts.get(v, 0) + 1
+
+        summary = {
+            "study_name": study_cfg.get("name", ""),
+            "model_name": model_cfg.get("model_name", ""),
+            "policy_count": len(policies_used),
+            "prompt_count": prompt_count,
+            "row_count": len(rows),
+            "repetitions": repetitions,
+            "verdict_summary": verdict_counts,
+            "policies_used": policies_used,
+            "output_dir": str(self.output_dir),
+        }
+        write_run_summary(self.output_dir / "run_summary.json", summary)
+        return summary
+
+    @property
+    def rows(self) -> list[dict]:
+        return self._rows
+
+    def close(self) -> None:
+        if not self._file.closed:
+            self._file.close()
