@@ -138,15 +138,14 @@ harness.
 
 The adapter interface (`adapters/base.py`) defines three methods:
 `prepare_model`, `describe`, `cleanup`. The baseline adapter
-(`adapters/none.py`) is a clean pass-through. The external stub
-(`adapters/external_stub.py`) fails loudly if enabled without a real backend.
+(`adapters/none.py`) is a clean pass-through. The `TurboQuantAdapter`
+(`adapters/turboquant.py`) wraps turboquant-core, handling field-name
+normalization between the eval harness and the core library.
 
-**Observation:** The safe and aggressive policy templates
-(`configs/policies/safe_template.yaml`, `aggressive_template.yaml`) are disabled
-stubs pointing to `ExternalCompressionAdapterStub`. This means the harness
-**currently can only run a single-policy (baseline) study**. Until real
-compression backends are wired in, the comparison framework is untestable for
-its core purpose.
+The safe and aggressive policy templates
+(`configs/policies/safe_template.yaml`, `aggressive_template.yaml`) are enabled
+and point to `TurboQuantAdapter`. The harness can run multi-policy comparison
+studies out of the box.
 
 ---
 

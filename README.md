@@ -31,7 +31,7 @@ The scaffold is **ready to run** for:
 - preflight instrumentation
 - baseline workflow study
 
-It includes a **pluggable adapter interface** and disabled template configs (`safe_template.yaml`, `aggressive_template.yaml`) for wiring a real compression backend from [turboquant-core](https://github.com/Flaker420/turboquant-core). These templates point to a stub adapter that raises an error until you replace the import path with your own backend class.
+It includes a **pluggable adapter interface** and ready-to-use template configs (`safe_template.yaml`, `aggressive_template.yaml`) that use the built-in `TurboQuantAdapter` to delegate to [turboquant-core](https://github.com/Flaker420/turboquant-core). Both templates are enabled by default.
 
 ## What is built in
 
@@ -52,26 +52,21 @@ Built in and ready to run:
 - Gradio web UI (`app.py`) for browser-based interaction
 - unit tests for the scaffold
 
-## What you still need to wire
+## What is wired
 
-This repository does **not** ship a production TurboQuant kernel.
+[turboquant-core](https://github.com/Flaker420/turboquant-core) is installed automatically via `requirements.txt`. What is included:
 
-What is included now:
 - a pass-through baseline adapter (runs the model with no compression)
-- stub-backed safe and aggressive policy templates (disabled by default; wire a real backend to enable)
+- a `TurboQuantAdapter` that bridges turboquant-core to the eval harness
+- safe and aggressive policy templates (both enabled, pointing to `TurboQuantAdapter`)
 
-To test real compression, install [turboquant-core](https://github.com/Flaker420/turboquant-core), write an adapter class, and point a policy config at it. See `docs/adapter-interface.md` for the full contract.
+To run a compression comparison, no additional wiring is needed -- just run the study with the desired policy configs. See `docs/adapter-interface.md` for the adapter contract if you want to write a custom adapter.
 
-## Wiring turboquant-core
+## turboquant-core integration
 
-This evaluation harness is designed to work with [turboquant-core](https://github.com/Flaker420/turboquant-core). To wire it:
+[turboquant-core](https://github.com/Flaker420/turboquant-core) is listed in `requirements.txt` and installed automatically. The built-in `TurboQuantAdapter` (`src/turboquant_workflow_eval/adapters/turboquant.py`) wraps the core library's adapter, handling the `model_name` to `name` field normalization between the eval harness and the core library.
 
-1. Install turboquant-core in the same environment.
-2. Write an adapter class that calls `Qwen35KVBackend` (for Qwen3.5-9B) or `Qwen3DenseKVBackend` (for Qwen3-8B) inside `prepare_model`.
-3. Set the adapter's `import_path` in `safe_template.yaml` or `aggressive_template.yaml`.
-4. Set `enabled: true` in the policy config.
-
-See `docs/adapter-interface.md` for the full adapter contract and a concrete example.
+Both `safe_template.yaml` (bit_width 4) and `aggressive_template.yaml` (bit_width 2) are pre-configured and enabled. See `docs/adapter-interface.md` for the adapter contract if you need to write a custom adapter.
 
 ## RunPod-first design
 
@@ -306,4 +301,4 @@ This repository is intentionally opinionated:
 
 - vary compression **policy**, not model architecture
 - optimize for **workflow decisions**, not paper completeness
-- the safe and aggressive templates are stubs; wire [turboquant-core](https://github.com/Flaker420/turboquant-core) or your own backend to produce real compression comparisons
+- the safe and aggressive templates use the built-in `TurboQuantAdapter` backed by [turboquant-core](https://github.com/Flaker420/turboquant-core); write a custom adapter class if you need a different backend

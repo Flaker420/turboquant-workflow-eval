@@ -4,7 +4,7 @@ A compression policy is represented by an adapter class.
 
 ## Purpose
 
-The repository ships with a **baseline pass-through adapter** only. To test a real TurboQuant policy, implement a class that follows the adapter contract and point a policy config at it.
+The repository ships with a **baseline pass-through adapter** and a **TurboQuantAdapter** that wraps turboquant-core (`src/turboquant_workflow_eval/adapters/turboquant.py`). The safe and aggressive policy templates use this adapter by default. To use a different backend, implement a class that follows the adapter contract below and point a policy config at it.
 
 ## Contract
 
@@ -55,6 +55,8 @@ This repository does not assume every backend mutates the model the same way. Th
 - a staging backend you are evaluating internally
 
 ## Wiring turboquant-core
+
+> **Note:** turboquant-core is already wired. The built-in `TurboQuantAdapter` at `src/turboquant_workflow_eval/adapters/turboquant.py` wraps the core library and is used by both policy templates. The example below is for reference if you need to write a custom adapter with different behavior.
 
 [turboquant-core](https://github.com/Flaker420/turboquant-core) provides model-specific backends for KV-cache compression:
 
