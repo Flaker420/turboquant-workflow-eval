@@ -38,7 +38,7 @@ class TestResolveTorchDtype:
 class TestBuildModelKwargs:
     def test_basic(self, sample_model_config) -> None:
         kwargs = _build_model_kwargs(sample_model_config)
-        assert kwargs["torch_dtype"] is torch.bfloat16
+        assert kwargs["dtype"] is torch.bfloat16
         assert kwargs["trust_remote_code"] is False
         assert kwargs["device_map"] == "auto"
 
@@ -57,6 +57,32 @@ class TestBuildModelKwargs:
         kwargs = _build_model_kwargs(cfg)
         assert "attn_implementation" not in kwargs
         assert "language_model_only" not in kwargs
+
+
+class TestLoadModelLanguageModelOnly:
+    """Verify that language_model_only skips the multimodal loader."""
+
+    def test_skips_image_text_loader(self) -> None:
+        from turboquant_workflow_eval.model_loader import load_model_and_tokenizer
+
+        cfg = {"model_name": "test/model", "dtype": "bf16", "language_model_only": True}
+        fake_model = MagicMock()
+        fake_tokenizer = MagicMock()
+
+        mock_tf = MagicMock()
+        mock_tf.AutoTokenizer.from_pretrained.return_value = fake_tokenizer
+        mock_tf.AutoModelForCausalLM.from_pretrained.return_value = fake_model
+        mock_tf.AutoModelForImageTextToText = MagicMock()
+
+        with patch.dict("sys.modules", {"transformers": mock_tf}):
+            model, tokenizer, loader_name = load_model_and_tokenizer(cfg)
+
+        mock_tf.AutoModelForImageTextToText.from_pretrained.assert_not_called()
+        mock_tf.AutoModelForCausalLM.from_pretrained.assert_called_once()
+        assert loader_name == "AutoModelForCausalLM"
+        # language_model_only should NOT be in the kwargs passed to from_pretrained
+        call_kwargs = mock_tf.AutoModelForCausalLM.from_pretrained.call_args[1]
+        assert "language_model_only" not in call_kwargs
 
 
 class TestResolveLanguageModelRoot:

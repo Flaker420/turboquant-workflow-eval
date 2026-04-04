@@ -22,7 +22,7 @@ def resolve_torch_dtype(name: str) -> torch.dtype:
 
 def _build_model_kwargs(model_cfg: dict) -> dict:
     kwargs = {
-        "torch_dtype": resolve_torch_dtype(model_cfg["dtype"]),
+        "dtype": resolve_torch_dtype(model_cfg["dtype"]),
         "trust_remote_code": bool(model_cfg.get("trust_remote_code", True)),
         "device_map": model_cfg.get("device_map", "auto"),
     }
@@ -45,7 +45,10 @@ def load_model_and_tokenizer(model_cfg: dict) -> tuple[Any, Any, str]:
     )
 
     errors: list[str] = []
-    for loader_name in ("AutoModelForImageTextToText", "AutoModelForCausalLM", "AutoModel"):
+    loaders = ("AutoModelForImageTextToText", "AutoModelForCausalLM", "AutoModel")
+    if model_kwargs.pop("language_model_only", False):
+        loaders = ("AutoModelForCausalLM", "AutoModel")
+    for loader_name in loaders:
         loader = getattr(transformers, loader_name, None)
         if loader is None:
             continue

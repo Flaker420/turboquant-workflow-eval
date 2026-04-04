@@ -4,13 +4,14 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  bash scripts/bootstrap_runpod.sh [--download-model] [--tokenizer-only] [--fast-path] [--model-config PATH]
+  bash scripts/bootstrap_runpod.sh [--download-model] [--tokenizer-only] [--no-fast-path] [--model-config PATH]
 
 Options:
   --download-model   Warm the Hugging Face cache for the configured model.
   --download-all     Download all models found in configs/model/.
   --tokenizer-only   Only valid with --download-model/--download-all. Cache tokenizer/config only.
-  --fast-path        Attempt optional fast-path packages after the base environment is ready.
+  --fast-path        No-op, kept for backwards compatibility. Fast-path packages are now installed by default.
+  --no-fast-path     Skip fast-path package installation (flash-linear-attention, causal-conv1d).
   --model-config     Model config to use for single-model cache warmup.
   -h, --help         Show this help message.
 
@@ -28,7 +29,7 @@ REPO_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 DOWNLOAD_MODEL=0
 DOWNLOAD_ALL=0
 TOKENIZER_ONLY=0
-FAST_PATH=0
+SKIP_FAST_PATH=0
 MODEL_CONFIG="configs/model/qwen35_9b_text_only.yaml"
 
 while [[ $# -gt 0 ]]; do
@@ -46,7 +47,11 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --fast-path)
-      FAST_PATH=1
+      # No-op, kept for backwards compatibility.
+      shift
+      ;;
+    --no-fast-path)
+      SKIP_FAST_PATH=1
       shift
       ;;
     --model-config)
@@ -88,10 +93,12 @@ source "${VENV_DIR}/bin/activate"
 python -m pip install --upgrade pip "setuptools<82" wheel ninja
 python -m pip install -r "${REPO_DIR}/requirements-runpod-cu128.txt"
 python -m pip install -r "${REPO_DIR}/requirements.txt"
+python -m pip install -e "${REPO_DIR}[dev]"
 
-if [[ "$FAST_PATH" -eq 1 ]]; then
-  python -m pip install -U flash-linear-attention || true
-  python -m pip install -U causal-conv1d --no-build-isolation || true
+if [[ "$SKIP_FAST_PATH" -ne 1 ]]; then
+  echo "Attempting fast-path packages (flash-linear-attention, causal-conv1d)..."
+  python -m pip install flash-linear-attention || echo "  flash-linear-attention: install failed (non-fatal)"
+  python -m pip install causal-conv1d --no-build-isolation || echo "  causal-conv1d: install failed (non-fatal)"
 fi
 
 cat > "${REPO_DIR}/.env.runpod" <<EOF
