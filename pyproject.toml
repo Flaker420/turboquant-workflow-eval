@@ -5,6 +5,9 @@ description = "RunPod-first evaluation harness for TurboQuant KV-cache compressi
 readme = "README.md"
 requires-python = ">=3.10"
 
+[project.optional-dependencies]
+eval = ["sentence-transformers>=2.0"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

@@ -34,13 +34,22 @@ def load_prompt_pack(path: str | Path) -> list[PromptSpec]:
     raw_prompts = data.get("prompts", [])
     prompts: list[PromptSpec] = []
     for item in raw_prompts:
+        test_cases = item.get("test_cases")
+        if test_cases is not None:
+            test_cases = tuple(test_cases)
+        turns = item.get("turns")
+        if turns is not None:
+            turns = tuple(turns)
         prompts.append(
             PromptSpec(
                 id=item["id"],
                 category=item["category"],
                 title=item["title"],
-                prompt=item["prompt"].rstrip(),
+                prompt=item.get("prompt", "").rstrip(),
                 watch_for=item.get("watch_for", ""),
+                reference_answer=item.get("reference_answer"),
+                test_cases=test_cases,
+                turns=turns,
             )
         )
     return prompts

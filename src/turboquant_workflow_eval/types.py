@@ -40,6 +40,9 @@ class PromptSpec:
     title: str
     prompt: str
     watch_for: str = ""
+    reference_answer: str | None = None
+    test_cases: tuple[dict[str, str], ...] | None = None
+    turns: tuple[dict[str, str], ...] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

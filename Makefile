@@ -8,7 +8,7 @@ POLICY_CONFIGS ?= configs/policies/baseline.yaml
 OUTPUT_DIR ?= outputs/study_run
 DOWNLOAD_OUTPUT ?= outputs/download_summary.json
 
-.PHONY: help test validate download-model download-all check-cache list-attention preflight study ui
+.PHONY: help test validate download-model download-all check-cache list-attention preflight study study-full generate-prompts ui
 
 help:
 	@printf "%s\n" \
@@ -45,6 +45,12 @@ preflight:
 
 study:
 	python scripts/run_workflow_study.py --study-config $(STUDY_CONFIG) --policy-configs $(POLICY_CONFIGS) --output-dir $(OUTPUT_DIR)
+
+study-full:
+	python scripts/run_workflow_study.py --study-config configs/studies/full.yaml --policy-configs $(POLICY_CONFIGS) --output-dir $(OUTPUT_DIR)
+
+generate-prompts:
+	python scripts/generate_prompts.py --model-config $(MODEL_CONFIG) --output prompts/generated_long_context.yaml
 
 ui:
 	python app.py

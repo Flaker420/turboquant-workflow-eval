@@ -8,10 +8,18 @@ import torch
 from .model_loader import infer_model_device
 
 
-def render_prompt(tokenizer: Any, prompt_text: str) -> str:
+def render_prompt(tokenizer: Any, prompt_text: str, turns: tuple[dict[str, str], ...] | None = None) -> str:
+    """Render a prompt through the tokenizer's chat template.
+
+    If *turns* is provided, they are used as a multi-turn conversation;
+    otherwise *prompt_text* is wrapped in a single user message.
+    """
     chat_template = getattr(tokenizer, "chat_template", None)
     if chat_template:
-        messages = [{"role": "user", "content": prompt_text}]
+        if turns:
+            messages = list(turns)
+        else:
+            messages = [{"role": "user", "content": prompt_text}]
         return tokenizer.apply_chat_template(
             messages,
             tokenize=False,
@@ -32,11 +40,17 @@ def _reset_peak_vram(device) -> None:
         torch.cuda.reset_peak_memory_stats(device)
 
 
-def generate_one(model: Any, tokenizer: Any, prompt_text: str, runtime_cfg: dict) -> dict[str, Any]:
+def generate_one(
+    model: Any,
+    tokenizer: Any,
+    prompt_text: str,
+    runtime_cfg: dict,
+    turns: tuple[dict[str, str], ...] | None = None,
+) -> dict[str, Any]:
     model.eval()
     device = infer_model_device(model)
 
-    rendered_prompt = render_prompt(tokenizer, prompt_text)
+    rendered_prompt = render_prompt(tokenizer, prompt_text, turns=turns)
     encoded = tokenizer(
         rendered_prompt,
         return_tensors="pt",
