@@ -1,9 +1,12 @@
 [project]
 name = "turboquant-workflow-eval"
-version = "0.2.0"
+version = "0.3.0"
 description = "RunPod-first evaluation harness for TurboQuant KV-cache compression across supported models."
 readme = "README.md"
 requires-python = ">=3.10"
+dependencies = [
+    "turboquant-core @ git+https://github.com/Flaker420/turboquant-core.git",
+]
 
 [project.optional-dependencies]
 eval = ["sentence-transformers>=2.0"]

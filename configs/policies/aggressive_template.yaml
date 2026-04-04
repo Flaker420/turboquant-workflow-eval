@@ -1,13 +1,11 @@
 name: turboquant_aggressive
-enabled: false
+enabled: true
 comparison_label: aggressive
 adapter:
-  import_path: turboquant_workflow_eval.adapters.external_stub:ExternalCompressionAdapterStub
+  import_path: turboquant_workflow_eval.adapters.turboquant:TurboQuantAdapter
 settings:
   bit_width: 2
-  backend_label: replace_with_real_backend
   scope: full_attention_only
   profile: aggressive
 notes:
-  - Replace the adapter import path with a real backend before enabling this policy.
-  - Intended for a second-pass stress comparison after the safe policy is working.
+  - Stress profile — run after the safe policy is validated.
