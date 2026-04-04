@@ -416,6 +416,7 @@ def load_prompt_pack_info(study_config_path):
 
 def run_study_ui(study_config_path, policy_paths, output_dir,
                  repetitions, temperature, max_new_tokens, shuffle_policies,
+                 model_config_override,
                  progress=gr.Progress()):
     if not study_config_path:
         return "Select a study config.", None
@@ -450,6 +451,7 @@ def run_study_ui(study_config_path, policy_paths, output_dir,
             policy_configs_arg=policy_arg,
             runtime_overrides=overrides or None,
             progress_callback=_progress_cb,
+            model_config_override=model_config_override or None,
         )
         progress(1.0, desc="Complete")
         status = (
@@ -487,6 +489,14 @@ def build_study_tab():
             info="Where to write study results",
         )
 
+        model_configs = _discover_model_config_paths()
+        model_override_dd = gr.Dropdown(
+            choices=[""] + model_configs,
+            value="",
+            label="Model Config Override",
+            info="Leave blank to use the model from the study config, or select to override",
+        )
+
         with gr.Accordion("Runtime Overrides", open=False):
             gr.Markdown("Leave blank to use defaults from the study config.")
             with gr.Row():
@@ -514,7 +524,8 @@ def build_study_tab():
         run_btn.click(
             fn=run_study_ui,
             inputs=[study_dd, policy_cb, output_dir,
-                    repetitions, temperature, max_new_tokens, shuffle_policies],
+                    repetitions, temperature, max_new_tokens, shuffle_policies,
+                    model_override_dd],
             outputs=[study_status, study_json],
         )
 
