@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import gc
 import json
 import subprocess
 import sys
@@ -19,7 +20,7 @@ from turboquant_workflow_eval.download import (
     download_one,
     format_summary_table,
 )
-from turboquant_workflow_eval.prompts import load_prompt_source
+from turboquant_workflow_eval.prompts import load_prompt_pack, load_prompt_source
 
 # ---------------------------------------------------------------------------
 # Shared state for loaded model across tabs
@@ -67,6 +68,51 @@ def _short_path(p: str) -> str:
         return str(Path(p).relative_to(_PROJECT_ROOT))
     except ValueError:
         return p
+
+
+def _render_verdict_summary_html(summary: dict | None) -> str:
+    """Render green/yellow/red verdict counts as colored HTML boxes."""
+    if not summary:
+        return ""
+    counts = summary.get("verdict_summary", {})
+    total = sum(counts.values()) or 1
+    colors = {"green": "#2ecc71", "yellow": "#f39c12", "red": "#e74c3c"}
+    boxes = []
+    for level in ("green", "yellow", "red"):
+        n = counts.get(level, 0)
+        pct = n / total * 100
+        boxes.append(
+            f'<div style="display:inline-block;padding:12px 20px;margin:4px;'
+            f"border-radius:8px;background:{colors[level]};color:white;"
+            f'font-weight:bold;min-width:80px;text-align:center">'
+            f"{level.upper()}<br>{n} ({pct:.0f}%)</div>"
+        )
+    return f'<div style="margin:8px 0">{"".join(boxes)}</div>'
+
+
+def _style_verdict_column(csv_rows: list[dict]) -> str:
+    """Render the CSV comparison table as an HTML table with colored verdict cells."""
+    if not csv_rows:
+        return ""
+    colors = {"green": "#d5f5e3", "yellow": "#fdebd0", "red": "#fadbd8"}
+    headers = list(csv_rows[0].keys())
+    header_html = "".join(f"<th style='padding:6px 8px;border:1px solid #ddd'>{h}</th>" for h in headers)
+    rows_html = []
+    for row in csv_rows:
+        cells = []
+        for h in headers:
+            val = row.get(h, "")
+            style = "padding:6px 8px;border:1px solid #ddd"
+            if h == "verdict" and val in colors:
+                style += f";background:{colors[val]};font-weight:bold"
+            cells.append(f"<td style='{style}'>{val}</td>")
+        rows_html.append(f"<tr>{''.join(cells)}</tr>")
+    return (
+        "<div style='overflow-x:auto;max-height:500px;overflow-y:auto'>"
+        f"<table style='border-collapse:collapse;font-size:13px'>"
+        f"<thead><tr>{header_html}</tr></thead>"
+        f"<tbody>{''.join(rows_html)}</tbody></table></div>"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +256,22 @@ def discover_blocks():
     return status, gr.Dataframe(value=rows, headers=headers)
 
 
+def unload_model():
+    """Free GPU memory by unloading the current model."""
+    import torch
+
+    if _state["model"] is None:
+        return "No model loaded."
+    _state.update(
+        model=None, tokenizer=None, loader_name=None,
+        model_cfg=None, lm_root=None, attention_blocks=None,
+    )
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return "Model unloaded. GPU memory released."
+
+
 def build_inspect_tab():
     with gr.Blocks() as tab:
         gr.Markdown("## Model Inspection")
@@ -220,7 +282,9 @@ def build_inspect_tab():
             label="Model Config",
             info="Select a model config YAML",
         )
-        load_btn = gr.Button("Load Model", variant="primary")
+        with gr.Row():
+            load_btn = gr.Button("Load Model", variant="primary")
+            unload_btn = gr.Button("Unload Model", variant="stop")
         model_status = gr.Textbox(label="Model Status", lines=4, interactive=False)
 
         gr.Markdown("---")
@@ -233,6 +297,7 @@ def build_inspect_tab():
         )
 
         load_btn.click(fn=load_model, inputs=model_dd, outputs=[model_status, block_table])
+        unload_btn.click(fn=unload_model, outputs=model_status)
         discover_btn.click(fn=discover_blocks, outputs=[block_status, block_table])
 
     return tab
@@ -243,18 +308,21 @@ def build_inspect_tab():
 # ---------------------------------------------------------------------------
 
 
-def run_preflight_ui(max_length, use_cache):
+def run_preflight_ui(max_length, use_cache, progress=gr.Progress()):
     if _state["model"] is None:
         return "Load a model first (Tab 2).", None
 
     from turboquant_workflow_eval.module_discovery import discover_attention_blocks
     from turboquant_workflow_eval.preflight import run_preflight
 
+    progress(0, desc="Preparing preflight...")
+
     if _state["attention_blocks"] is None:
         cfg = _state["model_cfg"] or {}
         expected = cfg.get("layout", {}).get("attention_blocks")
         _state["attention_blocks"] = discover_attention_blocks(_state["lm_root"], expected_count=expected)
 
+    progress(0.2, desc="Running preflight instrumentation...")
     prompts = load_prompt_source("builtin")
     report = run_preflight(
         model=_state["model"],
@@ -267,6 +335,7 @@ def run_preflight_ui(max_length, use_cache):
         loader_name=_state["loader_name"],
     )
 
+    progress(1.0, desc="Done")
     status = (
         f"Preflight complete. {report['prompt_count']} prompts, "
         f"{len(report.get('attention_blocks', []))} blocks profiled."
@@ -313,7 +382,41 @@ def load_study_policies(study_config_path):
     return gr.update(choices=policies, value=policies)
 
 
-def run_study_ui(study_config_path, policy_paths, output_dir):
+def load_prompt_pack_info(study_config_path):
+    """Load and summarise the prompt pack referenced by a study config."""
+    if not study_config_path:
+        return "", None
+    cfg = load_yaml(study_config_path)
+    prompt_pack_cfg = cfg["prompt_pack"]
+    if isinstance(prompt_pack_cfg, list):
+        prompts = []
+        for pp in prompt_pack_cfg:
+            prompts.extend(load_prompt_pack(resolve_relative_path(study_config_path, pp)))
+    else:
+        prompts = load_prompt_pack(resolve_relative_path(study_config_path, prompt_pack_cfg))
+
+    categories = {}
+    for p in prompts:
+        categories[p.category] = categories.get(p.category, 0) + 1
+    cat_summary = ", ".join(f"{k}: {v}" for k, v in sorted(categories.items()))
+    summary = f"{len(prompts)} prompts — {cat_summary}"
+
+    rows = []
+    for p in prompts:
+        rows.append([
+            p.id,
+            p.category,
+            p.title,
+            "yes" if p.reference_answer else "",
+            "yes" if p.test_cases else "",
+            (p.prompt[:100] + "...") if len(p.prompt) > 100 else p.prompt,
+        ])
+    return summary, rows
+
+
+def run_study_ui(study_config_path, policy_paths, output_dir,
+                 repetitions, temperature, max_new_tokens, shuffle_policies,
+                 progress=gr.Progress()):
     if not study_config_path:
         return "Select a study config.", None
     if not policy_paths:
@@ -324,12 +427,31 @@ def run_study_ui(study_config_path, policy_paths, output_dir):
     output_dir = output_dir.strip() or "outputs/study_run"
     policy_arg = ",".join(policy_paths)
 
+    # Build runtime overrides from non-default UI values
+    overrides: dict = {}
+    if repetitions is not None and repetitions > 0:
+        overrides["repetitions"] = int(repetitions)
+    if temperature is not None and temperature >= 0:
+        overrides["temperature"] = float(temperature)
+    if max_new_tokens is not None and max_new_tokens > 0:
+        overrides["max_new_tokens"] = int(max_new_tokens)
+    if shuffle_policies:
+        overrides["shuffle_policies"] = True
+
+    progress(0, desc="Starting study...")
+
+    def _progress_cb(frac: float, desc: str = "") -> None:
+        progress(frac, desc=desc)
+
     try:
         summary = run_workflow_study(
             study_config_path=study_config_path,
             output_dir=output_dir,
             policy_configs_arg=policy_arg,
+            runtime_overrides=overrides or None,
+            progress_callback=_progress_cb,
         )
+        progress(1.0, desc="Complete")
         status = (
             f"Study complete: {summary['row_count']} rows across "
             f"{summary['policy_count']} policy(ies), "
@@ -365,13 +487,34 @@ def build_study_tab():
             info="Where to write study results",
         )
 
+        with gr.Accordion("Runtime Overrides", open=False):
+            gr.Markdown("Leave blank to use defaults from the study config.")
+            with gr.Row():
+                repetitions = gr.Number(label="Repetitions", precision=0)
+                temperature = gr.Number(label="Temperature")
+                max_new_tokens = gr.Number(label="Max New Tokens", precision=0)
+            shuffle_policies = gr.Checkbox(label="Shuffle policy order", value=False)
+
+        with gr.Accordion("Prompt Pack Preview", open=False):
+            prompt_summary = gr.Textbox(label="Summary", lines=1, interactive=False)
+            prompt_table = gr.Dataframe(
+                label="Prompts",
+                headers=["ID", "Category", "Title", "Reference", "Tests", "Preview"],
+                interactive=False,
+            )
+            study_dd.change(
+                fn=load_prompt_pack_info, inputs=study_dd,
+                outputs=[prompt_summary, prompt_table],
+            )
+
         run_btn = gr.Button("Run Study", variant="primary")
         study_status = gr.Textbox(label="Status", lines=4, interactive=False)
         study_json = gr.JSON(label="Run Summary")
 
         run_btn.click(
             fn=run_study_ui,
-            inputs=[study_dd, policy_cb, output_dir],
+            inputs=[study_dd, policy_cb, output_dir,
+                    repetitions, temperature, max_new_tokens, shuffle_policies],
             outputs=[study_status, study_json],
         )
 
@@ -385,29 +528,31 @@ def build_study_tab():
 
 def load_results(output_dir_path):
     if not output_dir_path:
-        return "Select an output directory.", None, gr.update(choices=[], value=None), "", None
+        return "Select an output directory.", "", "", gr.update(choices=[], value=None), "", "", None
 
     out = Path(output_dir_path)
 
-    # Load CSV
+    # Load CSV rows for styled table
     csv_path = out / "workflow_compare.csv"
-    csv_data = None
+    csv_rows: list[dict] = []
     if csv_path.exists():
         with csv_path.open("r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
-        if rows:
-            headers = list(rows[0].keys())
-            csv_data = gr.Dataframe(
-                value=[[row.get(h, "") for h in headers] for row in rows],
-                headers=headers,
-            )
+            csv_rows = list(csv.DictReader(f))
+    styled_table_html = _style_verdict_column(csv_rows)
 
     # Load summary
     summary_path = out / "run_summary.json"
     summary = None
     if summary_path.exists():
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
+
+    verdict_html = _render_verdict_summary_html(summary)
+
+    # Load examples.md
+    examples_path = out / "examples.md"
+    examples_md = ""
+    if examples_path.exists():
+        examples_md = examples_path.read_text(encoding="utf-8")
 
     # Discover text outputs for prompt selector
     text_dir = out / "text_outputs"
@@ -418,9 +563,11 @@ def load_results(output_dir_path):
     status = f"Loaded results from {_short_path(output_dir_path)}."
     return (
         status,
-        csv_data,
+        verdict_html,
+        styled_table_html,
         gr.update(choices=prompt_files, value=prompt_files[0] if prompt_files else None),
         "",
+        examples_md,
         summary,
     )
 
@@ -457,12 +604,18 @@ def build_results_tab():
         load_btn = gr.Button("Load Results", variant="primary")
         results_status = gr.Textbox(label="Status", lines=1, interactive=False)
 
+        gr.Markdown("### Verdict Summary")
+        verdict_html = gr.HTML()
+
         gr.Markdown("### Comparison Table")
-        results_table = gr.Dataframe(label="workflow_compare.csv", interactive=False)
+        results_table = gr.HTML(label="workflow_compare.csv")
 
         gr.Markdown("### Prompt Outputs")
         prompt_dd = gr.Dropdown(choices=[], label="Select Prompt Output")
         prompt_md = gr.Markdown(label="Output")
+
+        with gr.Accordion("Side-by-Side Comparison (examples.md)", open=False):
+            examples_md = gr.Markdown()
 
         gr.Markdown("### Run Summary")
         summary_json = gr.JSON(label="run_summary.json")
@@ -470,7 +623,8 @@ def build_results_tab():
         load_btn.click(
             fn=load_results,
             inputs=output_dd,
-            outputs=[results_status, results_table, prompt_dd, prompt_md, summary_json],
+            outputs=[results_status, verdict_html, results_table,
+                     prompt_dd, prompt_md, examples_md, summary_json],
         )
         prompt_dd.change(
             fn=view_prompt_output,
