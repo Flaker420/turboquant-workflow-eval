@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import re
 import subprocess
 import sys
@@ -142,10 +143,10 @@ def _values_match(actual_repr: str, expected_literal: str) -> bool:
     if a == e:
         return True
 
-    # Try evaluating both and comparing
+    # Try evaluating both as literals and comparing
     try:
-        actual_val = eval(a)  # noqa: S307
-        expected_val = eval(e)  # noqa: S307
+        actual_val = ast.literal_eval(a)
+        expected_val = ast.literal_eval(e)
         if actual_val == expected_val:
             return True
         # Float tolerance

@@ -9,7 +9,7 @@ from typing import Any
 import torch
 
 from .code_runner import extract_python_code, run_code_with_tests
-from .config import load_yaml, resolve_relative_path
+from .config import load_yaml, resolve_relative_path, validate_config
 from .generation import generate_one
 from .import_utils import load_object
 from .model_loader import load_model_and_tokenizer
@@ -36,6 +36,81 @@ def _aggregate_stats(values: list[float]) -> dict[str, float]:
     return {"mean": mean, "std": math.sqrt(variance)}
 
 
+def _run_single_prompt(
+    model: Any,
+    tokenizer: Any,
+    prompt: Any,
+    policy_cfg: dict,
+    adapter: Any,
+    runtime_cfg: dict,
+    repetitions: int,
+) -> dict[str, Any]:
+    """Run a single prompt through the model and collect metrics."""
+    first_result = generate_one(model, tokenizer, prompt.prompt, runtime_cfg, turns=prompt.turns)
+
+    latencies = [first_result["latency_s"]]
+    tps_values = [first_result["tokens_per_second"]] if first_result["tokens_per_second"] is not None else []
+    vram_values = [first_result["peak_vram_gb"]] if first_result["peak_vram_gb"] is not None else []
+
+    # Rec 6: additional repetitions (text is deterministic, only collect metrics)
+    for _ in range(repetitions - 1):
+        rep_result = generate_one(model, tokenizer, prompt.prompt, runtime_cfg, turns=prompt.turns)
+        latencies.append(rep_result["latency_s"])
+        if rep_result["tokens_per_second"] is not None:
+            tps_values.append(rep_result["tokens_per_second"])
+        if rep_result["peak_vram_gb"] is not None:
+            vram_values.append(rep_result["peak_vram_gb"])
+
+    lat_stats = _aggregate_stats(latencies)
+    tps_stats = _aggregate_stats(tps_values)
+    vram_stats = _aggregate_stats(vram_values)
+
+    row: dict[str, Any] = {
+        "policy_name": policy_cfg["name"],
+        "comparison_label": policy_cfg.get("comparison_label", policy_cfg["name"]),
+        "adapter_name": getattr(adapter, "name", adapter.__class__.__name__),
+        "prompt_id": prompt.id,
+        "category": prompt.category,
+        "title": prompt.title,
+        "watch_for": prompt.watch_for,
+        "prompt_text": prompt.prompt,
+        **first_result,
+    }
+
+    # Add repetition stats
+    if repetitions > 1:
+        row["latency_mean"] = lat_stats["mean"]
+        row["latency_std"] = lat_stats["std"]
+        row["tps_mean"] = tps_stats["mean"]
+        row["tps_std"] = tps_stats["std"]
+        row["vram_mean"] = vram_stats["mean"]
+        row["vram_std"] = vram_stats["std"]
+        row["repetitions"] = repetitions
+
+    # Rec 2: math reference-answer checking
+    row["math_correct"] = check_reference_answer(
+        first_result["output_text"],
+        prompt.reference_answer,
+    )
+
+    # Rec 5: code execution for coding prompts
+    if prompt.test_cases:
+        code = extract_python_code(first_result["output_text"])
+        if code:
+            code_result = run_code_with_tests(code, list(prompt.test_cases))
+            row["code_passed"] = code_result["passed"]
+            row["code_failed"] = code_result["failed"]
+            row["code_errors"] = code_result["errors"]
+            row["code_verdict"] = code_result["verdict"]
+        else:
+            row["code_verdict"] = "error"
+            row["code_passed"] = 0
+            row["code_failed"] = 0
+            row["code_errors"] = 1
+
+    return row
+
+
 def run_workflow_study(
     study_config_path: str | Path,
     output_dir: str | Path,
@@ -45,7 +120,10 @@ def run_workflow_study(
 ) -> dict:
     study_config_path = Path(study_config_path)
     study_cfg = load_yaml(study_config_path)
-    model_cfg = load_yaml(resolve_relative_path(study_config_path, study_cfg["model_config"]))
+    validate_config(study_cfg, "study", study_config_path)
+    model_cfg_path = resolve_relative_path(study_config_path, study_cfg["model_config"])
+    model_cfg = load_yaml(model_cfg_path)
+    validate_config(model_cfg, "model", model_cfg_path)
 
     # Support single path or list of paths for prompt_pack
     prompt_pack_cfg = study_cfg["prompt_pack"]
@@ -78,6 +156,7 @@ def run_workflow_study(
 
     for policy_path in policy_paths:
         policy_cfg = load_yaml(policy_path)
+        validate_config(policy_cfg, "policy", policy_path)
         if not bool(policy_cfg.get("enabled", False)):
             continue
 
@@ -107,68 +186,32 @@ def run_workflow_study(
                 total = len(policy_paths) * len(prompt_pack)
                 progress_callback(done / total, f"{policy_cfg['name']}: {prompt.id}")
 
-            # First run: capture full result including text
-            first_result = generate_one(model, tokenizer, prompt.prompt, runtime_cfg, turns=prompt.turns)
-
-            latencies = [first_result["latency_s"]]
-            tps_values = [first_result["tokens_per_second"]] if first_result["tokens_per_second"] is not None else []
-            vram_values = [first_result["peak_vram_gb"]] if first_result["peak_vram_gb"] is not None else []
-
-            # Rec 6: additional repetitions (text is deterministic, only collect metrics)
-            for _ in range(repetitions - 1):
-                rep_result = generate_one(model, tokenizer, prompt.prompt, runtime_cfg, turns=prompt.turns)
-                latencies.append(rep_result["latency_s"])
-                if rep_result["tokens_per_second"] is not None:
-                    tps_values.append(rep_result["tokens_per_second"])
-                if rep_result["peak_vram_gb"] is not None:
-                    vram_values.append(rep_result["peak_vram_gb"])
-
-            lat_stats = _aggregate_stats(latencies)
-            tps_stats = _aggregate_stats(tps_values)
-            vram_stats = _aggregate_stats(vram_values)
-
-            row: dict[str, Any] = {
-                "policy_name": policy_cfg["name"],
-                "comparison_label": policy_cfg.get("comparison_label", policy_cfg["name"]),
-                "adapter_name": getattr(adapter, "name", adapter.__class__.__name__),
-                "prompt_id": prompt.id,
-                "category": prompt.category,
-                "title": prompt.title,
-                "watch_for": prompt.watch_for,
-                "prompt_text": prompt.prompt,
-                **first_result,
-            }
-
-            # Add repetition stats
-            if repetitions > 1:
-                row["latency_mean"] = lat_stats["mean"]
-                row["latency_std"] = lat_stats["std"]
-                row["tps_mean"] = tps_stats["mean"]
-                row["tps_std"] = tps_stats["std"]
-                row["vram_mean"] = vram_stats["mean"]
-                row["vram_std"] = vram_stats["std"]
-                row["repetitions"] = repetitions
-
-            # Rec 2: math reference-answer checking
-            row["math_correct"] = check_reference_answer(
-                first_result["output_text"],
-                prompt.reference_answer,
-            )
-
-            # Rec 5: code execution for coding prompts
-            if prompt.test_cases:
-                code = extract_python_code(first_result["output_text"])
-                if code:
-                    code_result = run_code_with_tests(code, list(prompt.test_cases))
-                    row["code_passed"] = code_result["passed"]
-                    row["code_failed"] = code_result["failed"]
-                    row["code_errors"] = code_result["errors"]
-                    row["code_verdict"] = code_result["verdict"]
-                else:
-                    row["code_verdict"] = "error"
-                    row["code_passed"] = 0
-                    row["code_failed"] = 0
-                    row["code_errors"] = 1
+            try:
+                row = _run_single_prompt(
+                    model, tokenizer, prompt, policy_cfg, adapter, runtime_cfg, repetitions,
+                )
+            except Exception as exc:  # noqa: BLE001
+                # Error recovery: log failure and continue with remaining prompts
+                print(f"  [WARNING] prompt {prompt.id} failed: {exc}")
+                row = {
+                    "policy_name": policy_cfg["name"],
+                    "comparison_label": policy_cfg.get("comparison_label", policy_cfg["name"]),
+                    "adapter_name": getattr(adapter, "name", adapter.__class__.__name__),
+                    "prompt_id": prompt.id,
+                    "category": prompt.category,
+                    "title": prompt.title,
+                    "watch_for": prompt.watch_for,
+                    "prompt_text": prompt.prompt,
+                    "output_text": f"[ERROR] {exc}",
+                    "output_tokens": 0,
+                    "latency_s": 0.0,
+                    "tokens_per_second": None,
+                    "peak_vram_gb": None,
+                    "rendered_prompt": "",
+                    "prompt_tokens": 0,
+                    "math_correct": None,
+                    "error": str(exc),
+                }
 
             rows.append(row)
 
