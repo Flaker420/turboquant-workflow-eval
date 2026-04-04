@@ -45,6 +45,10 @@ Built in and ready to run:
 - Q / K / V projection capture for preflight checks
 - baseline pass-through adapter
 - workflow study runner and report generation
+- automated quality scoring (math reference checking, code execution, semantic similarity)
+- configurable green/yellow/red verdict system with per-prompt verdicts
+- repetition support with mean/std aggregation for stable benchmarking
+- prompt generation script for long-context evaluation prompts
 - Gradio web UI (`app.py`) for browser-based interaction
 - unit tests for the scaffold
 
@@ -257,6 +261,14 @@ python scripts/run_preflight_stats.py [--experiment-config PATH] [--output-dir P
 python scripts/run_workflow_study.py [--study-config PATH] [--policy-configs PATH1,PATH2,...] [--output-dir PATH]
 ```
 
+### `scripts/generate_prompts.py`
+
+```bash
+python scripts/generate_prompts.py [--model-config PATH] [--output PATH] [--max-new-tokens N]
+```
+
+Generates long-context evaluation prompts using the target model. The output YAML follows the same schema as `prompts/workflow_prompts.yaml` and can be used with `configs/studies/full.yaml`.
+
 ## Outputs
 
 For each policy you test, the repo produces concrete artifacts you can compare:
@@ -273,7 +285,7 @@ That gives you a direct **works / degrades / fails** view instead of a research-
 
 - `app.py` -- Gradio web UI (launch with `make ui`)
 - `configs/` -- model, policy, and study configs
-- `docs/` -- architecture facts, scope, RunPod setup, manual runbook, and adapter contract
+- `docs/` -- architecture facts, scope, RunPod setup, manual runbook, adapter contract, data-workflow review, and current RunPod state
 - `prompts/` -- fixed workflow prompt pack
 - `scripts/` -- RunPod bootstrap and entrypoints
 - `src/` -- reusable package code

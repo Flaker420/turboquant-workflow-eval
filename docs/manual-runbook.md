@@ -135,7 +135,25 @@ Optional parameters:
 - `--policy-configs PATH1,PATH2,...`
 - `--output-dir PATH`
 
-## 9. Expected outputs
+## 9. Generate additional prompts (optional)
+
+Generate long-context evaluation prompts using the target model:
+
+```bash
+python scripts/generate_prompts.py \
+  --model-config configs/model/qwen35_9b_text_only.yaml \
+  --output prompts/generated_long_context.yaml \
+  --max-new-tokens 2048
+```
+
+Optional parameters:
+- `--model-config PATH`
+- `--output PATH`
+- `--max-new-tokens N`
+
+The generated YAML follows the same schema as the fixed prompt pack. To use it in a study, pass `configs/studies/full.yaml` as the study config (which references both the fixed and generated prompt packs) or use `make study-full`.
+
+## 10. Expected outputs
 
 Workflow study outputs:
 - `workflow_compare.csv`

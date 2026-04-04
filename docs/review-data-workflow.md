@@ -10,7 +10,7 @@
 ### 1.1 Prompt Pack Design
 
 The entire evaluation dataset is a single YAML file
-(`prompts/workflow_prompts.yaml`) containing **16 hand-crafted prompts** in four
+(`prompts/workflow_prompts.yaml`) containing **14 hand-crafted prompts** in four
 categories:
 
 | Category   | Count | Example prompt IDs              |
@@ -47,10 +47,11 @@ categories:
   long prompts"). The `max_input_tokens` setting of 4096 is never exercised.
   This is a significant gap: the evaluation does not stress-test the regime
   where KV-cache compression matters most.
-- **No ground-truth or reference outputs.** There is no baseline-expected
-  answer stored alongside each prompt. Without references, there is no way to
-  automate pass/fail scoring, compute BLEU/ROUGE, or detect regressions in
-  CI. Every evaluation requires a human reading `examples.md`.
+- **Limited ground-truth coverage.** Math prompts now carry `reference_answer`
+  fields and coding prompts carry `test_cases` with input/expected pairs,
+  enabling automated pass/fail scoring for those categories. Reasoning and
+  retrieval prompts still lack reference outputs and require human review of
+  `examples.md`.
 - **No multi-turn or system-prompt coverage.** Real workflows frequently
   involve multi-turn conversations and system prompts. Compression artefacts
   can accumulate across turns, but this is untested.
@@ -89,27 +90,23 @@ it guarantees that results always reflect the current code and model state.
 | `prompt_tokens`   | Tokenizer output shape                   | Correct. |
 | `output_tokens`   | Generated sequence length minus prompt    | Correct. |
 
-**Concerns:**
+**Concerns (all resolved as of PR #8):**
 
-1. **No warmup pass.** The first prompt of each policy pays JIT compilation and
-   CUDA kernel launch costs. This inflates the first measurement and distorts
-   per-category averages. A single untimed warmup generation before the timed
-   loop would eliminate this confound.
-   (`study.py:56` — the prompt loop starts immediately after `prepare_model`.)
+1. ~~**No warmup pass.**~~ **Resolved.** A single untimed warmup generation
+   (`generate_one(model, tokenizer, "Say hello.", runtime_cfg)`) now runs
+   before the timed prompt loop (`study.py:101`), eliminating JIT/compilation
+   noise from the first real measurement.
 
-2. **Single run per prompt.** Each prompt-policy pair is evaluated exactly once.
-   There is no repetition, no mean/standard-deviation, and no confidence
-   interval. Even with deterministic decoding, latency and VRAM measurements
-   have run-to-run variance from GPU scheduling, thermal throttling, and OS
-   background activity. A minimum of 3–5 runs per pair is standard practice
-   for hardware benchmarking.
+2. ~~**Single run per prompt.**~~ **Resolved.** The study config now supports a
+   `repetitions` parameter (default 3 per `configs/studies/default.yaml:16`).
+   Additional repetitions collect latency, tokens/sec, and VRAM measurements
+   (`study.py:118–124`), and the results include per-metric mean and standard
+   deviation via `_aggregate_stats()` (`study.py:27–36`).
 
-3. **Fixed policy execution order.** Policies are evaluated in config-file order
-   (baseline → safe → aggressive; `study.py:35`). Despite model reloading and
-   `torch.cuda.empty_cache()` between policies (`study.py:73–78`), ordering
-   effects can still arise from GPU thermal state, fragmented CUDA memory
-   pools, and NCCL state. Shuffling the policy order (or running each policy
-   in a fresh process) would strengthen the design.
+3. ~~**Fixed policy execution order.**~~ **Resolved.** The runtime config
+   supports `shuffle_policies` and `shuffle_seed` (`study.py:70–74`). When
+   enabled, the policy execution order is randomised with a deterministic seed
+   for reproducibility.
 
 ### 2.2 Statistical Infrastructure
 
@@ -170,32 +167,40 @@ artefact types:
 
 This is a well-designed set of outputs for a manual review workflow.
 
-### 3.2 What Is Missing from Evaluation
+### 3.2 Automated Evaluation (implemented as of PRs #8–#10)
 
-- **No automated quality scoring.** The `watch_for` field is a label for humans,
-  not a scoring function. There is no code anywhere in the repository that
-  compares model outputs to expected answers, computes similarity metrics, or
-  flags regressions. The green/yellow/red decision framework described in
-  `docs/study-scope.md:30–34` has **no programmatic implementation**.
+The evaluation layer originally identified as absent has been implemented:
 
-- **No diff or delta computation.** When comparing baseline vs. compressed
-  output, the reviewer must read both outputs in `examples.md` and mentally
-  diff them. There is no automated text diff, no semantic similarity score, no
-  output-length delta column in the CSV.
+- **Math reference-answer checking.** `scoring.py:check_reference_answer()`
+  extracts numbers from model output and compares them against the
+  `reference_answer` field on each prompt with configurable tolerance (default
+  5% relative). Results appear as `math_correct` in the output rows.
 
-- **No pass/fail thresholds.** There are no configurable thresholds for latency
-  regression, VRAM increase, or quality degradation that would let the harness
-  flag a policy as "red" automatically.
+- **Code execution for coding prompts.** `code_runner.py` extracts Python code
+  blocks from model output and runs them against `test_cases` defined in the
+  prompt YAML. Results include `code_passed`, `code_failed`, `code_errors`,
+  and a `code_verdict` (pass / fail / error).
 
-- **No code-execution tests for coding prompts.** The four coding prompts ask
-  for Python functions. The harness could execute the generated code and test
-  it against known inputs — this would provide a strong, objective quality
-  signal. Currently, correctness is assessed only by reading the output.
+- **Semantic similarity.** `scoring.py:compute_semantic_similarity()` uses
+  sentence-transformers (optional dependency) to compute cosine similarity
+  between baseline and compressed outputs. The score appears as
+  `semantic_similarity` in the output rows.
 
-- **No numerical-answer checking for math prompts.** The four math prompts have
-  deterministic correct answers (e.g. CAGR ≈ 20.5%, weighted average = 86.2,
-  token estimate = 2040). Automated extraction and comparison of the final
-  numeric answer would be straightforward and high-value.
+- **Output-length delta.** `study.py:199–202` computes
+  `output_length_delta_pct` for each row relative to the baseline policy.
+
+- **Configurable green/yellow/red verdict system.**
+  `scoring.py:compute_verdict()` aggregates latency regression, output-length
+  delta, semantic similarity, math correctness, and code execution results
+  into a single `verdict` per row. Thresholds are configurable in the study
+  config (`configs/studies/default.yaml:19–25`).
+
+**Remaining gaps:**
+
+- Reasoning and retrieval prompts still lack reference outputs and require
+  human review of `examples.md` and `watch_for` annotations.
+- No automated text diff between baseline and compressed outputs beyond the
+  semantic similarity score.
 
 ---
 
@@ -227,65 +232,74 @@ logic** or the **evaluation methodology**.
 
 | Aspect                  | Verdict | Explanation |
 |-------------------------|---------|-------------|
-| "Which policy is usable" | Partially | The harness collects latency, VRAM, and throughput metrics that help answer performance questions. But "usable" also means "output quality is acceptable", and there is no automated quality assessment. |
-| "What degrades"         | Partially | Side-by-side markdown comparison shows *what changed*, but only to a human reader. There is no automated degradation detection. |
-| "When I push harder"    | Weak | The prompt set does not vary in difficulty or length. There are no long-context, multi-turn, or adversarial prompts that would stress-test compression at its limits. |
+| "Which policy is usable" | Yes | The harness collects performance metrics (latency, VRAM, throughput) and automated quality signals (math correctness, code execution, semantic similarity). The verdict system aggregates these into a green/yellow/red decision per prompt-policy pair. Reasoning and retrieval prompts still require human judgment. |
+| "What degrades"         | Mostly | Automated degradation detection via output-length delta, semantic similarity, and the verdict system. Side-by-side markdown comparison remains available for human review. |
+| "When I push harder"    | Weak | The prompt set does not vary in difficulty or length. There are no long-context, multi-turn, or adversarial prompts that would stress-test compression at its limits. `scripts/generate_prompts.py` exists to create long-context prompts but they are not in the default prompt pack. |
 
-**Overall pertinence: moderate.** The harness is well-architected and produces
-the right *kinds* of data, but the evaluation methodology stops short of
-answering the core question without significant manual effort. It is a strong
-data-collection framework that lacks an analysis layer.
+**Overall pertinence: good.** The harness now has a substantive analysis layer
+on top of its data-collection framework. The primary remaining gap is **data
+coverage** — the prompt set is too small and too short to stress-test the regime
+where KV-cache compression matters most.
 
 ---
 
 ## 6. Recommendations
 
-Ranked by impact-to-effort ratio:
+Ranked by impact-to-effort ratio. Implementation status updated as of PRs
+#8–#10.
 
 ### High Impact, Low Effort
 
-1. **Add a warmup generation** before the timed prompt loop in `study.py`.
-   A single untimed generation with a short prompt eliminates JIT/compilation
-   noise from the first real measurement.
+1. **~~Add a warmup generation.~~** **Done.** `study.py:101` runs an untimed
+   warmup generation before the timed prompt loop.
 
-2. **Add reference answers for math prompts.** Store the expected numeric answer
-   in each `PromptSpec` and compare against extracted values from the output.
-   Four prompts, four numbers — immediate automated quality signal.
+2. **~~Add reference answers for math prompts.~~** **Done.**
+   `scoring.py:check_reference_answer()` compares extracted numbers against
+   `reference_answer` fields in the prompt YAML (with 5% relative tolerance).
 
-3. **Add output-length delta to CSV.** In `reporting.py`, include a column
-   showing the percentage change in `output_tokens` relative to the baseline
-   policy. Large length changes are a reliable early signal of compression
-   damage.
+3. **~~Add output-length delta to CSV.~~** **Done.** `study.py:199–202`
+   computes `output_length_delta_pct` for each row relative to the baseline.
 
 ### High Impact, Moderate Effort
 
-4. **Add 8–12 long-context prompts** (1000–4000 tokens of input context).
-   These should exercise the regime where KV-cache compression has the largest
-   effect. Retrieval-augmented prompts with large context windows are ideal.
+4. **Add 8–12 long-context prompts.** **Partial.**
+   `scripts/generate_prompts.py` can create long-context prompts
+   programmatically, and `configs/studies/full.yaml` references a generated
+   prompt pack alongside the fixed pack. However, no long-context prompts are
+   included in the default prompt pack yet.
 
-5. **Execute generated code for coding prompts.** Run the Python output through
-   `exec()` or a subprocess with known test inputs. Report pass/fail in the
-   CSV.
+5. **~~Execute generated code for coding prompts.~~** **Done.**
+   `code_runner.py` extracts Python code blocks and runs them against
+   `test_cases` from the prompt YAML in a sandboxed subprocess with timeout.
+   Results appear as `code_passed`, `code_failed`, `code_errors`, and
+   `code_verdict` in output rows.
 
-6. **Add 3–5 repetitions per prompt-policy pair** for latency/VRAM and report
-   mean ± std. Keep only one text output per pair (they are deterministic).
+6. **~~Add 3–5 repetitions per prompt-policy pair.~~** **Done.** The study
+   config supports a `repetitions` parameter (default 3). Additional
+   repetitions collect latency/TPS/VRAM metrics (`study.py:118–124`) and
+   report mean ± std. Only one text output is kept per pair.
 
 ### Medium Impact, Higher Effort
 
-7. **Implement automated semantic comparison.** Use a lightweight similarity
-   metric (e.g., sentence-transformer cosine similarity between baseline and
-   compressed outputs) to produce a per-prompt quality score.
+7. **~~Implement automated semantic comparison.~~** **Done.**
+   `scoring.py:compute_semantic_similarity()` uses sentence-transformers
+   cosine similarity between baseline and compressed outputs. Requires the
+   optional `sentence-transformers` dependency.
 
-8. **Implement the green/yellow/red threshold system.** Define configurable
-   thresholds in the study config (e.g., latency regression < 10% = green,
-   10–25% = yellow, > 25% = red) and add a `verdict` column to the CSV.
+8. **~~Implement the green/yellow/red threshold system.~~** **Done.**
+   `scoring.py:compute_verdict()` uses configurable thresholds from the study
+   config (`latency_yellow_pct`, `latency_red_pct`, `similarity_yellow`,
+   `similarity_red`, `output_length_yellow_pct`, `output_length_red_pct`).
+   The `verdict` column appears in all output formats.
 
-9. **Randomize or interleave policy execution order.** Either shuffle policy
-   order or run each policy in a separate subprocess to eliminate ordering
-   confounds.
+9. **~~Randomize or interleave policy execution order.~~** **Done.**
+   `study.py:70–74` implements `shuffle_policies` with a deterministic
+   `shuffle_seed` in the runtime config.
 
-10. **Add multi-turn prompt sequences.** At least 2–3 multi-turn conversations
-    to test whether compression artefacts accumulate across turns.
+10. **Add multi-turn prompt sequences.** **Not started.** The `PromptSpec`
+    dataclass includes a `turns` field and `generate_one()` supports
+    multi-turn generation, but no multi-turn prompts exist in the prompt pack
+    yet.
 
 ---
 
@@ -294,16 +308,16 @@ Ranked by impact-to-effort ratio:
 | Dimension              | Rating       | Notes |
 |------------------------|--------------|-------|
 | Prompt relevance       | Good         | Domain-appropriate, workflow-specific prompts |
-| Prompt coverage        | Insufficient | Too few, too short, no long-context stress tests |
+| Prompt coverage        | Insufficient | Too few (14), too short, no long-context stress tests |
 | Measurement quality    | Good         | Correct timing, VRAM tracking, deterministic config |
-| Statistical rigour     | Weak         | Single run, no warmup, fixed ordering |
-| Automated evaluation   | Absent       | No scoring, no thresholds, no regression detection |
-| Reporting              | Good         | Multiple formats, clean structure |
-| Fitness for purpose    | Moderate     | Strong collection framework, but requires manual analysis to draw conclusions |
+| Statistical rigour     | Adequate     | Warmup pass, 3 repetitions with mean/std, optional policy shuffle |
+| Automated evaluation   | Good         | Math checking, code execution, semantic similarity, configurable verdict system |
+| Reporting              | Good         | Multiple formats, clean structure, verdict column in all outputs |
+| Fitness for purpose    | Good         | Strong collection and analysis framework; remaining gap is data coverage |
 
-The harness is a solid foundation — the architecture is clean, the adapter
-interface is well-designed, and the measurement instrumentation is correct. The
-primary gaps are in **data coverage** (more and longer prompts) and in the
-**evaluation layer** (automated quality scoring and threshold-based verdicts).
-Addressing recommendations 1–3 would significantly strengthen the workflow with
-minimal effort.
+The harness has matured from a data-collection scaffold into a substantive
+evaluation framework. Recommendations 1–3 and 5–9 have been implemented,
+adding automated quality scoring, statistical repetitions, and a configurable
+verdict system. The primary remaining gap is **data coverage**: the prompt set
+is too small and too short to stress-test the regime where KV-cache compression
+matters most (recommendations 4 and 10).
