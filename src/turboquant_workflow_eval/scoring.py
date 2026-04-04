@@ -124,21 +124,55 @@ _DEFAULT_THRESHOLDS: dict[str, float] = {
 }
 
 
+def _resolve_thresholds(thresholds: dict[str, Any] | None, category: str | None = None) -> dict[str, float]:
+    """Resolve thresholds with per-category override support.
+
+    Accepts either a flat dict (legacy) or a nested dict with ``"default"``
+    and category-specific keys::
+
+        thresholds:
+          default:
+            latency_red_pct: 25.0
+          math:
+            latency_red_pct: 50.0
+
+    Falls back to ``_DEFAULT_THRESHOLDS`` for any missing key.
+    """
+    if not thresholds:
+        return dict(_DEFAULT_THRESHOLDS)
+
+    # Detect nested vs flat format
+    has_nested = "default" in thresholds and isinstance(thresholds["default"], dict)
+    if has_nested:
+        base = {**_DEFAULT_THRESHOLDS, **thresholds.get("default", {})}
+        if category and category in thresholds and isinstance(thresholds[category], dict):
+            base = {**base, **thresholds[category]}
+        return base
+
+    # Flat format (backward compatible)
+    return {**_DEFAULT_THRESHOLDS, **thresholds}
+
+
 def compute_verdict(
     row: dict[str, Any],
     baseline_row: dict[str, Any] | None,
-    thresholds: dict[str, float] | None = None,
+    thresholds: dict[str, Any] | None = None,
 ) -> str:
     """Return ``'green'``, ``'yellow'``, or ``'red'`` for a single result row.
 
     *baseline_row* is the corresponding row from the baseline policy for the
     same prompt. If ``None`` (i.e. this row **is** the baseline), returns
     ``'green'``.
+
+    *thresholds* can be a flat dict of threshold values, or a nested dict
+    with ``"default"`` and per-category overrides (e.g. ``"math"``,
+    ``"coding"``).
     """
     if baseline_row is None:
         return "green"
 
-    t = {**_DEFAULT_THRESHOLDS, **(thresholds or {})}
+    category = row.get("category")
+    t = _resolve_thresholds(thresholds, category)
     worst = "green"
 
     def _escalate(level: str) -> str:

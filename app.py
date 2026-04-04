@@ -20,7 +20,8 @@ from turboquant_workflow_eval.download import (
     download_one,
     format_summary_table,
 )
-from turboquant_workflow_eval.prompts import load_prompt_pack, load_prompt_source
+from turboquant_workflow_eval.prompts import filter_prompts, load_prompt_pack, load_prompt_source
+from turboquant_workflow_eval.scoring import _DEFAULT_THRESHOLDS
 
 # ---------------------------------------------------------------------------
 # Shared state for loaded model across tabs
@@ -420,16 +421,22 @@ def load_prompt_pack_info(study_config_path):
     return summary, rows
 
 
+_study_controller = None
+
+
 def run_study_ui(study_config_path, policy_paths, output_dir,
                  repetitions, temperature, max_new_tokens, shuffle_policies,
                  model_config_override,
+                 prompt_category_filter, prompt_id_filter,
                  progress=gr.Progress()):
+    global _study_controller
     if not study_config_path:
-        return "Select a study config.", None
+        return "Select a study config.", None, ""
     if not policy_paths:
-        return "Select at least one policy.", None
+        return "Select at least one policy.", None, ""
 
-    from turboquant_workflow_eval.study import run_workflow_study
+    from turboquant_workflow_eval.events import EventBus
+    from turboquant_workflow_eval.study import StudyController, run_workflow_study
 
     output_dir = output_dir.strip() or "outputs/study_run"
     policy_arg = ",".join(policy_paths)
@@ -445,6 +452,21 @@ def run_study_ui(study_config_path, policy_paths, output_dir,
     if shuffle_policies:
         overrides["shuffle_policies"] = True
 
+    # Prompt filtering
+    prompt_cats = [c.strip() for c in (prompt_category_filter or "").split(",") if c.strip()] or None
+    prompt_ids = [i.strip() for i in (prompt_id_filter or "").split(",") if i.strip()] or None
+
+    # Event bus + controller for live tracking
+    event_bus = EventBus()
+    _study_controller = StudyController(event_bus=event_bus)
+    completed_prompts = []
+
+    def _on_event(event):
+        if event.kind == "prompt_completed":
+            completed_prompts.append(event.data)
+
+    event_bus.subscribe(_on_event)
+
     progress(0, desc="Starting study...")
 
     def _progress_cb(frac: float, desc: str = "") -> None:
@@ -458,17 +480,47 @@ def run_study_ui(study_config_path, policy_paths, output_dir,
             runtime_overrides=overrides or None,
             progress_callback=_progress_cb,
             model_config_override=model_config_override or None,
+            prompt_ids=prompt_ids,
+            prompt_categories=prompt_cats,
+            event_bus=event_bus,
+            controller=_study_controller,
         )
         progress(1.0, desc="Complete")
+
+        verdict_html = _render_verdict_summary_html(summary)
         status = (
             f"Study complete: {summary['row_count']} rows across "
             f"{summary['policy_count']} policy(ies), "
             f"{summary['prompt_count']} prompt(s).\n"
             f"Outputs written to: {summary['output_dir']}"
         )
-        return status, summary
+        return status, summary, verdict_html
     except Exception as exc:
-        return f"Study failed: {exc}", None
+        return f"Study failed: {exc}", None, ""
+    finally:
+        _study_controller = None
+
+
+def stop_study():
+    """Signal the running study to stop."""
+    global _study_controller
+    if _study_controller:
+        _study_controller.stop()
+        return "Stop requested. Study will halt after current prompt."
+    return "No study is running."
+
+
+def pause_study():
+    """Toggle pause on the running study."""
+    global _study_controller
+    if _study_controller:
+        if _study_controller.paused:
+            _study_controller.resume()
+            return "Resumed."
+        else:
+            _study_controller.pause()
+            return "Paused. Click again to resume."
+    return "No study is running."
 
 
 def build_study_tab():
@@ -523,6 +575,17 @@ def build_study_tab():
                 max_new_tokens = gr.Number(label="Max New Tokens", precision=0)
             shuffle_policies = gr.Checkbox(label="Shuffle policy order", value=False)
 
+        with gr.Accordion("Prompt Filtering", open=False):
+            gr.Markdown("Filter which prompts to run. Leave blank for all prompts.")
+            prompt_category_filter = gr.Textbox(
+                label="Category Filter",
+                placeholder="e.g. math,coding (comma-separated)",
+            )
+            prompt_id_filter = gr.Textbox(
+                label="Prompt ID Filter",
+                placeholder="e.g. math_01,coding_02 (comma-separated)",
+            )
+
         default_prompt_summary = ""
         default_prompt_rows = None
         if default_study:
@@ -547,17 +610,28 @@ def build_study_tab():
                 outputs=[prompt_summary, prompt_table],
             )
 
-        run_btn = gr.Button("Run Study", variant="primary")
+        with gr.Row():
+            run_btn = gr.Button("Run Study", variant="primary")
+            pause_btn = gr.Button("Pause / Resume")
+            stop_btn = gr.Button("Stop", variant="stop")
+
         study_status = gr.Textbox(label="Status", lines=4, interactive=False)
+
+        gr.Markdown("### Live Verdict Summary")
+        live_verdict_html = gr.HTML()
+
         study_json = gr.JSON(label="Run Summary")
 
         run_btn.click(
             fn=run_study_ui,
             inputs=[study_dd, policy_cb, output_dir,
                     repetitions, temperature, max_new_tokens, shuffle_policies,
-                    model_override_dd],
-            outputs=[study_status, study_json],
+                    model_override_dd,
+                    prompt_category_filter, prompt_id_filter],
+            outputs=[study_status, study_json, live_verdict_html],
         )
+        pause_btn.click(fn=pause_study, outputs=study_status)
+        stop_btn.click(fn=stop_study, outputs=study_status)
 
     return tab
 
@@ -677,6 +751,384 @@ def build_results_tab():
 
 
 # ---------------------------------------------------------------------------
+# Tab 6 – Quick Test (single prompt, instant feedback)
+# ---------------------------------------------------------------------------
+
+
+def _load_prompt_choices():
+    """Load prompts from all available prompt packs for the quick-test dropdown."""
+    prompts = []
+    for study_path in (_PROJECT_ROOT / "configs" / "studies").glob("*.yaml"):
+        try:
+            cfg = load_yaml(study_path)
+            pp_cfg = cfg.get("prompt_pack")
+            if not pp_cfg:
+                continue
+            if isinstance(pp_cfg, list):
+                for pp in pp_cfg:
+                    prompts.extend(load_prompt_pack(resolve_relative_path(study_path, pp)))
+            else:
+                prompts.extend(load_prompt_pack(resolve_relative_path(study_path, pp_cfg)))
+        except Exception:
+            continue
+    # Deduplicate by id
+    seen = set()
+    unique = []
+    for p in prompts:
+        if p.id not in seen:
+            seen.add(p.id)
+            unique.append(p)
+    return unique
+
+
+_QUICK_TEST_PROMPTS = _load_prompt_choices()
+_PROMPT_MAP = {f"{p.id} — {p.title}": p for p in _QUICK_TEST_PROMPTS}
+
+
+def run_quick_test(
+    policy_path, prompt_choice, custom_prompt, max_new_tokens, temperature, repetitions,
+):
+    """Run a single prompt with a single policy, return instant results."""
+    if _state["model"] is None:
+        return "Load a model first (Tab 2: Model Inspection).", "", None
+
+    from turboquant_workflow_eval.generation import generate_one
+    from turboquant_workflow_eval.import_utils import load_object
+    from turboquant_workflow_eval.scoring import check_reference_answer, compute_verdict
+
+    model = _state["model"]
+    tokenizer = _state["tokenizer"]
+    model_cfg = _state["model_cfg"] or {}
+
+    # Resolve prompt
+    prompt_text = custom_prompt.strip() if custom_prompt.strip() else None
+    prompt_spec = None
+    if not prompt_text and prompt_choice:
+        prompt_spec = _PROMPT_MAP.get(prompt_choice)
+        if prompt_spec:
+            prompt_text = prompt_spec.prompt
+
+    if not prompt_text:
+        return "Enter a prompt or select one from the dropdown.", "", None
+
+    # Load and apply adapter
+    policy_cfg = load_yaml(policy_path) if policy_path else {"name": "quick-test", "adapter": None, "enabled": True}
+    adapter = None
+    if policy_cfg.get("adapter"):
+        try:
+            adapter_cls = load_object(policy_cfg["adapter"]["import_path"])
+            adapter = adapter_cls()
+            model, tokenizer = adapter.prepare_model(model, tokenizer, model_cfg, policy_cfg)
+        except Exception as exc:
+            return f"Adapter failed: {exc}", "", None
+
+    # Build runtime config
+    runtime_cfg = {
+        "max_input_tokens": 4096,
+        "max_new_tokens": int(max_new_tokens) if max_new_tokens else 256,
+        "do_sample": float(temperature or 0) > 0,
+        "temperature": float(temperature) if temperature else 0.0,
+    }
+
+    # Run
+    try:
+        reps = max(1, int(repetitions or 1))
+        results = []
+        for _ in range(reps):
+            result = generate_one(model, tokenizer, prompt_text, runtime_cfg)
+            results.append(result)
+
+        main_result = results[0]
+        output_text = main_result["output_text"]
+
+        # Metrics
+        avg_latency = sum(r["latency_s"] for r in results) / len(results)
+        tps = main_result.get("tokens_per_second")
+        vram = main_result.get("peak_vram_gb")
+
+        metrics = {
+            "latency_s": round(avg_latency, 4),
+            "tokens_per_second": round(tps, 2) if tps else None,
+            "peak_vram_gb": round(vram, 3) if vram else None,
+            "output_tokens": main_result.get("output_tokens", 0),
+            "prompt_tokens": main_result.get("prompt_tokens", 0),
+            "repetitions": reps,
+        }
+
+        # Scoring
+        if prompt_spec and prompt_spec.reference_answer:
+            metrics["math_correct"] = check_reference_answer(output_text, prompt_spec.reference_answer)
+
+        status = f"Completed in {avg_latency:.2f}s ({metrics['output_tokens']} tokens)"
+    except Exception as exc:
+        output_text = f"[ERROR] {exc}"
+        metrics = {"error": str(exc)}
+        status = f"Failed: {exc}"
+    finally:
+        # Revert adapter
+        if adapter:
+            if adapter.can_revert():
+                adapter.revert(model)
+            else:
+                adapter.cleanup(model)
+
+    return status, output_text, metrics
+
+
+def build_quick_test_tab():
+    with gr.Blocks() as tab:
+        gr.Markdown("## Quick Test")
+        gr.Markdown("Run a single prompt with instant feedback. Requires a model loaded in Tab 2.")
+
+        with gr.Row():
+            policy_configs = _discover_policy_config_paths()
+            policy_dd = gr.Dropdown(
+                choices=[""] + policy_configs,
+                value="",
+                label="Policy (optional)",
+                info="Leave blank for no compression (raw model)",
+            )
+
+        prompt_choices = list(_PROMPT_MAP.keys())
+        prompt_dd = gr.Dropdown(
+            choices=[""] + prompt_choices,
+            value="",
+            label="Select Prompt (from prompt pack)",
+        )
+        custom_prompt = gr.Textbox(
+            label="Or enter custom prompt",
+            placeholder="Type your own prompt here...",
+            lines=4,
+        )
+
+        with gr.Row():
+            max_new_tokens = gr.Number(label="Max New Tokens", value=256, precision=0)
+            temperature = gr.Number(label="Temperature", value=0.0)
+            repetitions = gr.Number(label="Repetitions", value=1, precision=0)
+
+        run_btn = gr.Button("Run Quick Test", variant="primary")
+        status_box = gr.Textbox(label="Status", lines=1, interactive=False)
+
+        gr.Markdown("### Output")
+        output_box = gr.Textbox(label="Model Output", lines=12, interactive=False)
+
+        gr.Markdown("### Metrics")
+        metrics_json = gr.JSON(label="Metrics")
+
+        run_btn.click(
+            fn=run_quick_test,
+            inputs=[policy_dd, prompt_dd, custom_prompt, max_new_tokens, temperature, repetitions],
+            outputs=[status_box, output_box, metrics_json],
+        )
+
+    return tab
+
+
+# ---------------------------------------------------------------------------
+# Tab 7 – Re-Score Results
+# ---------------------------------------------------------------------------
+
+
+def rescore_ui(
+    output_dir_path,
+    latency_yellow, latency_red,
+    similarity_yellow, similarity_red,
+    length_yellow, length_red,
+):
+    """Re-score existing results with new thresholds."""
+    if not output_dir_path:
+        return "Select an output directory.", "", None
+
+    from turboquant_workflow_eval.rescoring import rescore
+
+    thresholds = {
+        "latency_yellow_pct": float(latency_yellow),
+        "latency_red_pct": float(latency_red),
+        "similarity_yellow": float(similarity_yellow),
+        "similarity_red": float(similarity_red),
+        "output_length_yellow_pct": float(length_yellow),
+        "output_length_red_pct": float(length_red),
+    }
+
+    rows_path = Path(output_dir_path) / "rows.jsonl"
+    if not rows_path.exists():
+        return f"No rows.jsonl found in {output_dir_path}", "", None
+
+    try:
+        rows = rescore(
+            rows_jsonl_path=rows_path,
+            thresholds=thresholds,
+            output_dir=output_dir_path,
+        )
+    except Exception as exc:
+        return f"Re-scoring failed: {exc}", "", None
+
+    # Build verdict summary
+    verdict_counts = {"green": 0, "yellow": 0, "red": 0}
+    for row in rows:
+        v = row.get("verdict", "green")
+        verdict_counts[v] = verdict_counts.get(v, 0) + 1
+
+    summary = {"verdict_summary": verdict_counts, "row_count": len(rows)}
+    verdict_html = _render_verdict_summary_html(summary)
+
+    # Reload CSV for table
+    csv_path = Path(output_dir_path) / "workflow_compare.csv"
+    csv_rows = []
+    if csv_path.exists():
+        with csv_path.open("r", encoding="utf-8") as f:
+            csv_rows = list(csv.DictReader(f))
+    styled = _style_verdict_column(csv_rows)
+
+    status = f"Re-scored {len(rows)} rows with new thresholds."
+    return status, verdict_html, styled
+
+
+def build_rescore_tab():
+    with gr.Blocks() as tab:
+        gr.Markdown("## Re-Score Results")
+        gr.Markdown("Adjust verdict thresholds and instantly re-score existing results. **No GPU needed.**")
+
+        output_dirs = _discover_output_dirs()
+        output_dd = gr.Dropdown(
+            choices=output_dirs,
+            label="Output Directory",
+            info="Select a completed study output",
+        )
+
+        gr.Markdown("### Threshold Controls")
+        with gr.Row():
+            latency_yellow = gr.Slider(0, 100, value=_DEFAULT_THRESHOLDS["latency_yellow_pct"], step=1, label="Latency Yellow %")
+            latency_red = gr.Slider(0, 100, value=_DEFAULT_THRESHOLDS["latency_red_pct"], step=1, label="Latency Red %")
+        with gr.Row():
+            similarity_yellow = gr.Slider(0, 1, value=_DEFAULT_THRESHOLDS["similarity_yellow"], step=0.01, label="Similarity Yellow")
+            similarity_red = gr.Slider(0, 1, value=_DEFAULT_THRESHOLDS["similarity_red"], step=0.01, label="Similarity Red")
+        with gr.Row():
+            length_yellow = gr.Slider(0, 100, value=_DEFAULT_THRESHOLDS["output_length_yellow_pct"], step=1, label="Output Length Yellow %")
+            length_red = gr.Slider(0, 100, value=_DEFAULT_THRESHOLDS["output_length_red_pct"], step=1, label="Output Length Red %")
+
+        rescore_btn = gr.Button("Re-Score", variant="primary")
+        rescore_status = gr.Textbox(label="Status", lines=1, interactive=False)
+
+        gr.Markdown("### Updated Verdicts")
+        verdict_html = gr.HTML()
+        results_table = gr.HTML(label="Updated Comparison Table")
+
+        rescore_btn.click(
+            fn=rescore_ui,
+            inputs=[output_dd, latency_yellow, latency_red, similarity_yellow, similarity_red, length_yellow, length_red],
+            outputs=[rescore_status, verdict_html, results_table],
+        )
+
+    return tab
+
+
+# ---------------------------------------------------------------------------
+# Tab 8 – Side-by-Side Comparison
+# ---------------------------------------------------------------------------
+
+
+def compare_runs(dir_a, dir_b):
+    """Load two run outputs and compare side-by-side."""
+    if not dir_a or not dir_b:
+        return "Select two output directories.", ""
+
+    def _load_rows(d):
+        path = Path(d) / "rows.jsonl"
+        rows = {}
+        if path.exists():
+            with path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        row = json.loads(line)
+                        rows[(row["policy_name"], row["prompt_id"])] = row
+        return rows
+
+    rows_a = _load_rows(dir_a)
+    rows_b = _load_rows(dir_b)
+
+    # Build comparison for matching prompt_ids
+    all_keys = sorted(set(rows_a.keys()) | set(rows_b.keys()))
+    if not all_keys:
+        return "No rows found in either directory.", ""
+
+    html_parts = [
+        "<style>",
+        ".cmp-table { border-collapse: collapse; font-size: 13px; width: 100%; }",
+        ".cmp-table th, .cmp-table td { padding: 6px 8px; border: 1px solid #ddd; }",
+        ".cmp-table th { background: #f5f5f5; }",
+        ".diff { background: #fff3cd; }",
+        ".verdict-green { color: #2ecc71; font-weight: bold; }",
+        ".verdict-yellow { color: #f39c12; font-weight: bold; }",
+        ".verdict-red { color: #e74c3c; font-weight: bold; }",
+        "</style>",
+    ]
+
+    label_a = _short_path(dir_a)
+    label_b = _short_path(dir_b)
+
+    html_parts.append(f"<h3>Comparing: {label_a} vs {label_b}</h3>")
+    html_parts.append(
+        "<table class='cmp-table'>"
+        "<thead><tr>"
+        "<th>Policy</th><th>Prompt</th>"
+        f"<th>Verdict ({label_a})</th><th>Verdict ({label_b})</th>"
+        f"<th>Latency ({label_a})</th><th>Latency ({label_b})</th>"
+        f"<th>Tokens ({label_a})</th><th>Tokens ({label_b})</th>"
+        "</tr></thead><tbody>"
+    )
+
+    for key in all_keys:
+        ra = rows_a.get(key, {})
+        rb = rows_b.get(key, {})
+        va = ra.get("verdict", "—")
+        vb = rb.get("verdict", "—")
+        diff_class = " class='diff'" if va != vb else ""
+
+        def _fmt_verdict(v):
+            return f"<span class='verdict-{v}'>{v.upper()}</span>" if v in ("green", "yellow", "red") else v
+
+        html_parts.append(
+            f"<tr{diff_class}>"
+            f"<td>{key[0]}</td><td>{key[1]}</td>"
+            f"<td>{_fmt_verdict(va)}</td><td>{_fmt_verdict(vb)}</td>"
+            f"<td>{ra.get('latency_s', '—'):.4f}</td><td>{rb.get('latency_s', '—') if isinstance(rb.get('latency_s'), (int, float)) else '—'}</td>"
+            f"<td>{ra.get('output_tokens', '—')}</td><td>{rb.get('output_tokens', '—')}</td>"
+            f"</tr>"
+        )
+
+    html_parts.append("</tbody></table>")
+
+    changed = sum(1 for k in all_keys if rows_a.get(k, {}).get("verdict") != rows_b.get(k, {}).get("verdict"))
+    status = f"Compared {len(all_keys)} rows, {changed} verdict(s) differ."
+    return status, "\n".join(html_parts)
+
+
+def build_comparison_tab():
+    with gr.Blocks() as tab:
+        gr.Markdown("## Side-by-Side Comparison")
+        gr.Markdown("Compare two study runs to see what changed.")
+
+        output_dirs = _discover_output_dirs()
+        with gr.Row():
+            dir_a = gr.Dropdown(choices=output_dirs, label="Run A")
+            dir_b = gr.Dropdown(choices=output_dirs, label="Run B")
+
+        compare_btn = gr.Button("Compare", variant="primary")
+        compare_status = gr.Textbox(label="Status", lines=1, interactive=False)
+        comparison_html = gr.HTML(label="Comparison")
+
+        compare_btn.click(
+            fn=compare_runs,
+            inputs=[dir_a, dir_b],
+            outputs=[compare_status, comparison_html],
+        )
+
+    return tab
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -687,10 +1139,15 @@ def main():
     preflight_tab = build_preflight_tab()
     study_tab = build_study_tab()
     results_tab = build_results_tab()
+    quick_test_tab = build_quick_test_tab()
+    rescore_tab = build_rescore_tab()
+    comparison_tab = build_comparison_tab()
 
     demo = gr.TabbedInterface(
-        [env_tab, inspect_tab, preflight_tab, study_tab, results_tab],
-        ["Environment", "Model Inspection", "Preflight", "Study Runner", "Results"],
+        [env_tab, inspect_tab, preflight_tab, study_tab, results_tab,
+         quick_test_tab, rescore_tab, comparison_tab],
+        ["Environment", "Model Inspection", "Preflight", "Study Runner", "Results",
+         "Quick Test", "Re-Score", "Comparison"],
         title="TurboQuant Workflow Eval",
     )
     demo.launch(server_name="0.0.0.0", server_port=7860, share=False)

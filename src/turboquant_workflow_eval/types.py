@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -31,6 +32,21 @@ class AttentionBlockRef:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass
+class StudyContext:
+    """Holds all resolved configuration for a study run (no GPU state)."""
+
+    study_cfg: dict[str, Any]
+    model_cfg: dict[str, Any]
+    model_cfg_path: Path
+    prompt_pack: list[Any]  # list[PromptSpec] — forward ref avoidance
+    policy_paths: list[Path]
+    runtime_cfg: dict[str, Any]
+    thresholds_cfg: dict[str, Any]
+    output_dir: Path
+    repetitions: int = 1
 
 
 @dataclass(frozen=True)

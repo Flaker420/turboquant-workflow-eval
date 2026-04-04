@@ -16,3 +16,12 @@ class NoCompressionAdapter(CompressionAdapter):
             "adapter": self.name,
             "comparison_label": policy_cfg.get("comparison_label", "baseline"),
         }
+
+    def can_revert(self) -> bool:
+        return True
+
+    def revert(self, model: Any) -> bool:
+        return True
+
+    def get_state(self) -> dict:
+        return {"adapter": self.name, "compression": "none"}
