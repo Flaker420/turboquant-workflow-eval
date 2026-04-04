@@ -109,10 +109,10 @@ source .env.runpod
 source /workspace/venvs/turboquant-eval/bin/activate
 ```
 
-Install the validated environment and attempt the optional fast-path packages:
+Fast-path packages (flash-linear-attention, causal-conv1d) are now installed by default. To skip them:
 
 ```bash
-bash scripts/bootstrap_runpod.sh --download-model --fast-path
+bash scripts/bootstrap_runpod.sh --download-model --no-fast-path
 source .env.runpod
 source /workspace/venvs/turboquant-eval/bin/activate
 ```
@@ -217,7 +217,7 @@ Launches the web UI on port 7860. See the [Web UI](#web-ui-gradio) section above
 ### `scripts/bootstrap_runpod.sh`
 
 ```bash
-bash scripts/bootstrap_runpod.sh [--download-model] [--download-all] [--tokenizer-only] [--fast-path] [--model-config PATH]
+bash scripts/bootstrap_runpod.sh [--download-model] [--download-all] [--tokenizer-only] [--no-fast-path] [--model-config PATH]
 ```
 
 Environment overrides:

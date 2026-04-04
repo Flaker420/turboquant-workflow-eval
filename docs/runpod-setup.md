@@ -43,10 +43,10 @@ source .env.runpod
 source /workspace/venvs/turboquant-eval/bin/activate
 ```
 
-Base environment + optional fast-path package attempt:
+Fast-path packages (flash-linear-attention, causal-conv1d) are installed by default. To skip them:
 
 ```bash
-bash scripts/bootstrap_runpod.sh --download-model --fast-path
+bash scripts/bootstrap_runpod.sh --download-model --no-fast-path
 source .env.runpod
 source /workspace/venvs/turboquant-eval/bin/activate
 ```
