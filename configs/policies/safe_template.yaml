@@ -1,13 +1,11 @@
 name: turboquant_safe
-enabled: false
+enabled: true
 comparison_label: safe
 adapter:
-  import_path: turboquant_workflow_eval.adapters.external_stub:ExternalCompressionAdapterStub
+  import_path: turboquant_workflow_eval.adapters.turboquant:TurboQuantAdapter
 settings:
   bit_width: 4
-  backend_label: replace_with_real_backend
   scope: full_attention_only
   profile: safe
 notes:
-  - Replace the adapter import path with a real backend before enabling this policy.
-  - Intended for your first conservative workflow comparison.
+  - Conservative compression profile for first workflow comparison.
