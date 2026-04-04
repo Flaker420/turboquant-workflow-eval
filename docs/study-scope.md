@@ -38,3 +38,5 @@ These are meant to be read side by side when deciding:
 - green: good enough for workflow use
 - yellow: usable with caution
 - red: too lossy or unstable
+
+These verdicts are now computed automatically by `scoring.py:compute_verdict()` using configurable thresholds defined in the study config (e.g. `configs/studies/default.yaml`). The thresholds cover latency regression, output-length delta, semantic similarity, math correctness, and code execution results.

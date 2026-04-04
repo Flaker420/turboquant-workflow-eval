@@ -20,6 +20,8 @@ help:
 	  "make list-attention             # Discover attention blocks" \
 	  "make preflight                  # Run preflight instrumentation" \
 	  "make study POLICY_CONFIGS=...   # Run workflow study" \
+	  "make study-full POLICY_CONFIGS=... # Run study with full prompt set" \
+	  "make generate-prompts           # Generate long-context prompts" \
 	  "make ui                         # Launch Gradio web UI"
 
 test:
