@@ -386,14 +386,20 @@ def load_prompt_pack_info(study_config_path):
     """Load and summarise the prompt pack referenced by a study config."""
     if not study_config_path:
         return "", None
-    cfg = load_yaml(study_config_path)
-    prompt_pack_cfg = cfg["prompt_pack"]
-    if isinstance(prompt_pack_cfg, list):
-        prompts = []
-        for pp in prompt_pack_cfg:
-            prompts.extend(load_prompt_pack(resolve_relative_path(study_config_path, pp)))
-    else:
-        prompts = load_prompt_pack(resolve_relative_path(study_config_path, prompt_pack_cfg))
+    try:
+        cfg = load_yaml(study_config_path)
+        prompt_pack_cfg = cfg["prompt_pack"]
+        if isinstance(prompt_pack_cfg, list):
+            prompts = []
+            for pp in prompt_pack_cfg:
+                try:
+                    prompts.extend(load_prompt_pack(resolve_relative_path(study_config_path, pp)))
+                except FileNotFoundError:
+                    pass
+        else:
+            prompts = load_prompt_pack(resolve_relative_path(study_config_path, prompt_pack_cfg))
+    except Exception as exc:
+        return f"Error loading prompt pack: {exc}", None
 
     categories = {}
     for p in prompts:
@@ -470,14 +476,26 @@ def build_study_tab():
         gr.Markdown("## Study Runner")
 
         study_configs = _discover_study_config_paths()
+        default_study = study_configs[0] if study_configs else None
+        default_policies: list[str] = []
+        if default_study:
+            try:
+                _cfg = load_yaml(default_study)
+                for _item in _cfg.get("policy_configs", []):
+                    default_policies.append(str(resolve_relative_path(default_study, _item)))
+            except Exception:
+                pass
+
         study_dd = gr.Dropdown(
             choices=study_configs,
+            value=default_study,
             label="Study Config",
             info="Select a study config YAML",
         )
 
         policy_cb = gr.CheckboxGroup(
-            choices=[],
+            choices=default_policies,
+            value=default_policies,
             label="Policy Configs",
             info="Policies to evaluate (auto-populated from study config)",
         )
@@ -505,12 +523,24 @@ def build_study_tab():
                 max_new_tokens = gr.Number(label="Max New Tokens", precision=0)
             shuffle_policies = gr.Checkbox(label="Shuffle policy order", value=False)
 
+        default_prompt_summary = ""
+        default_prompt_rows = None
+        if default_study:
+            try:
+                default_prompt_summary, default_prompt_rows = load_prompt_pack_info(default_study)
+            except Exception:
+                pass
+
         with gr.Accordion("Prompt Pack Preview", open=False):
-            prompt_summary = gr.Textbox(label="Summary", lines=1, interactive=False)
+            prompt_summary = gr.Textbox(
+                label="Summary", lines=1, interactive=False,
+                value=default_prompt_summary,
+            )
             prompt_table = gr.Dataframe(
                 label="Prompts",
                 headers=["ID", "Category", "Title", "Reference", "Tests", "Preview"],
                 interactive=False,
+                value=default_prompt_rows,
             )
             study_dd.change(
                 fn=load_prompt_pack_info, inputs=study_dd,
