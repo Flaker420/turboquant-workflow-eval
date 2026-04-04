@@ -25,6 +25,11 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         help="Comma-separated policy config paths (overrides study config)",
     )
+    parser.add_argument(
+        "--model-config",
+        default=None,
+        help="Override the model config from the study YAML",
+    )
     args = parser.parse_args(argv)
 
     from .study import run_workflow_study
@@ -33,6 +38,7 @@ def main(argv: list[str] | None = None) -> None:
         study_config_path=args.study_config,
         output_dir=args.output_dir,
         policy_configs_arg=args.policy_configs,
+        model_config_override=args.model_config,
     )
 
     print(json.dumps(summary, indent=2))

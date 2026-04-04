@@ -17,6 +17,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run the workflow comparison study.")
     parser.add_argument("--study-config", default="configs/studies/default.yaml")
     parser.add_argument("--policy-configs", default=None, help="Comma-separated policy config paths.")
+    parser.add_argument("--model-config", default=None, help="Override the model config from the study YAML.")
     parser.add_argument("--output-dir", default="outputs/study_run")
     args = parser.parse_args()
 
@@ -24,6 +25,7 @@ def main() -> None:
         study_config_path=args.study_config,
         output_dir=args.output_dir,
         policy_configs_arg=args.policy_configs,
+        model_config_override=args.model_config,
     )
     print(json.dumps(summary, indent=2))
 

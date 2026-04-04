@@ -117,11 +117,15 @@ def run_workflow_study(
     policy_configs_arg: str | None = None,
     runtime_overrides: dict | None = None,
     progress_callback: Any | None = None,
+    model_config_override: str | Path | None = None,
 ) -> dict:
     study_config_path = Path(study_config_path)
     study_cfg = load_yaml(study_config_path)
     validate_config(study_cfg, "study", study_config_path)
-    model_cfg_path = resolve_relative_path(study_config_path, study_cfg["model_config"])
+    if model_config_override:
+        model_cfg_path = Path(model_config_override)
+    else:
+        model_cfg_path = resolve_relative_path(study_config_path, study_cfg["model_config"])
     model_cfg = load_yaml(model_cfg_path)
     validate_config(model_cfg, "model", model_cfg_path)
 
