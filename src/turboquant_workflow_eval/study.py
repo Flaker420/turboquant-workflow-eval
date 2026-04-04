@@ -36,7 +36,13 @@ def _aggregate_stats(values: list[float]) -> dict[str, float]:
     return {"mean": mean, "std": math.sqrt(variance)}
 
 
-def run_workflow_study(study_config_path: str | Path, output_dir: str | Path, policy_configs_arg: str | None = None) -> dict:
+def run_workflow_study(
+    study_config_path: str | Path,
+    output_dir: str | Path,
+    policy_configs_arg: str | None = None,
+    runtime_overrides: dict | None = None,
+    progress_callback: Any | None = None,
+) -> dict:
     study_config_path = Path(study_config_path)
     study_cfg = load_yaml(study_config_path)
     model_cfg = load_yaml(resolve_relative_path(study_config_path, study_cfg["model_config"]))
@@ -52,6 +58,8 @@ def run_workflow_study(study_config_path: str | Path, output_dir: str | Path, po
 
     policy_paths = _load_policy_configs(study_config_path, study_cfg, policy_configs_arg)
     runtime_cfg = study_cfg["runtime"]
+    if runtime_overrides:
+        runtime_cfg = {**runtime_cfg, **runtime_overrides}
     thresholds_cfg = study_cfg.get("thresholds", {})
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -92,7 +100,13 @@ def run_workflow_study(study_config_path: str | Path, output_dir: str | Path, po
         # Rec 1: warmup — prime JIT/CUDA kernels with an untimed generation
         generate_one(model, tokenizer, "Say hello.", runtime_cfg)
 
-        for prompt in prompt_pack:
+        for prompt_idx, prompt in enumerate(prompt_pack):
+            if progress_callback:
+                policy_idx = [i for i, p in enumerate(policy_paths) if p == policy_path][0]
+                done = policy_idx * len(prompt_pack) + prompt_idx
+                total = len(policy_paths) * len(prompt_pack)
+                progress_callback(done / total, f"{policy_cfg['name']}: {prompt.id}")
+
             # First run: capture full result including text
             first_result = generate_one(model, tokenizer, prompt.prompt, runtime_cfg, turns=prompt.turns)
 
