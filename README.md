@@ -73,9 +73,9 @@ To run a compression comparison, no additional wiring is needed -- just run the 
 
 ## turboquant-core integration
 
-[turboquant-core](https://github.com/Flaker420/turboquant-core) is listed in `requirements.txt` and installed automatically. The built-in `TurboQuantAdapter` (`src/turboquant_workflow_eval/adapters/turboquant.py`) wraps the core library's adapter, handling the `model_name` → `name` field normalization between the eval harness and the core library, and validating that `model_name` is set on the model config (raises `ValueError` early if not).
+`turboquant-core` is **vendored in-tree** at `vendor/turboquant-core/` (added via `git subtree`). It is no longer a pip dependency — `pyproject.toml` adds `vendor/turboquant-core/src` to `pythonpath` and `vendor/turboquant-core/tests` to `testpaths`, so `from turboquant_core import …` and `pytest` both pick up the vendored copy automatically. Update it with `git pull` like any other in-tree code; there is no SHA pin to bump. The standalone `Flaker420/turboquant-core` repo is archived read-only.
 
-The dependency is pinned to a specific commit SHA in both `requirements.txt` and `pyproject.toml`. To bump the pin, replace the SHA after `@` in both files with the new core commit and re-run `pip install -e .`. The same procedure applies on RunPod (see `docs/manual-runbook.md` step 1).
+The built-in `TurboQuantAdapter` (`src/turboquant_workflow_eval/adapters/turboquant.py`) wraps the core library's adapter, handling the `model_name` → `name` field normalization between the eval harness and the core library, and validating that `model_name` is set on the model config (raises `ValueError` early if not).
 
 Both `safe_template.yaml` (bit_width 4) and `aggressive_template.yaml` (bit_width 2) are pre-configured and enabled. They forward `bit_width`, `seed`, `residual_window`, and `key_strategy` from `settings:` straight into turboquant-core; all four are recorded in `describe()` and on every result row, so they are visible in `run_summary.json` and the per-row CSV/JSONL outputs. See `docs/adapter-interface.md` for the adapter contract if you need to write a custom adapter.
 

@@ -22,9 +22,9 @@ export TOKENIZERS_PARALLELISM=false
 
 On the validated RunPod environment, the system CUDA toolkit is 12.8. Installing `torch==2.10.0+cu128` first keeps the Python stack aligned with that toolkit. Avoid installing a generic latest torch wheel into this venv.
 
-### Bumping the turboquant-core pin
+### turboquant-core is vendored
 
-`turboquant-core` is pinned to a specific commit SHA in **both** `requirements.txt` and `pyproject.toml`. To upgrade, replace the `@<sha>` suffix in both files with the new commit SHA, then re-run `pip install -r requirements.txt` (or `pip install -e .`). `requirements-runpod-cu128.txt` does not pin `turboquant-core` and does not need to be touched.
+`turboquant-core` is vendored in-tree at `vendor/turboquant-core/` (added via `git subtree`). It is no longer a pip dependency. To pick up upstream changes, just `git pull` like any other in-tree code — there is no SHA to bump in `requirements.txt` or `pyproject.toml`. The standalone `Flaker420/turboquant-core` repo is archived read-only.
 
 ## 2. Optional fast-path packages
 
