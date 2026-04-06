@@ -19,8 +19,9 @@ This repository is the evaluation counterpart to [turboquant-core](https://githu
 |-------|--------|------------------------|
 | Qwen3.5-9B | `configs/model/qwen35_9b_text_only.yaml` | `Qwen35KVBackend` |
 | Qwen3-8B | `configs/model/qwen3_8b.yaml` | `Qwen3DenseKVBackend` |
+| Qwen2.5-3B-Instruct | `configs/model/qwen25_3b.yaml` | `Qwen25DenseKVBackend` |
 
-Both models work with the same evaluation pipeline. Select the model by passing a different `--model-config` to the scripts or by editing the study/experiment config.
+All three models work with the same evaluation pipeline. Select the model by passing a different `--model-config` to the scripts or by editing the study/experiment config. Bundled study configs: `configs/studies/default.yaml` (Qwen3.5-9B), `configs/studies/default_qwen3_8b.yaml`, `configs/studies/default_qwen25_3b.yaml`.
 
 ## Ready-to-run status
 
@@ -77,8 +78,6 @@ To run a compression comparison, no additional wiring is needed -- just run the 
 The dependency is pinned to a specific commit SHA in both `requirements.txt` and `pyproject.toml`. To bump the pin, replace the SHA after `@` in both files with the new core commit and re-run `pip install -e .`. The same procedure applies on RunPod (see `docs/manual-runbook.md` step 1).
 
 Both `safe_template.yaml` (bit_width 4) and `aggressive_template.yaml` (bit_width 2) are pre-configured and enabled. They forward `bit_width`, `seed`, `residual_window`, and `key_strategy` from `settings:` straight into turboquant-core; all four are recorded in `describe()` and on every result row, so they are visible in `run_summary.json` and the per-row CSV/JSONL outputs. See `docs/adapter-interface.md` for the adapter contract if you need to write a custom adapter.
-
-> **Note:** turboquant-core ships a `Qwen25DenseKVBackend` for Qwen2.5-3B-Instruct in addition to the Qwen3.5/Qwen3 backends. The harness does not bundle a Qwen2.5 model config yet -- add one analogous to `configs/model/qwen3_8b.yaml` if you want to evaluate it.
 
 ## Study configuration
 
@@ -139,6 +138,12 @@ To use Qwen3-8B instead of the default Qwen3.5-9B:
 
 ```bash
 bash scripts/bootstrap_runpod.sh --download-model --model-config configs/model/qwen3_8b.yaml
+```
+
+Or Qwen2.5-3B-Instruct:
+
+```bash
+bash scripts/bootstrap_runpod.sh --download-model --model-config configs/model/qwen25_3b.yaml
 ```
 
 Alternatively, after bootstrapping, launch the web UI to run the entire workflow from your browser:

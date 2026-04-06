@@ -8,12 +8,11 @@ Which compression policy is usable in my workflow, and what degrades when I push
 
 ## Supported models
 
-- **Qwen3.5-9B** -- hybrid architecture (8 full-attention + 24 DeltaNet layers), uses `Qwen35KVBackend`
-- **Qwen3-8B** -- dense attention (36 layers), uses `Qwen3DenseKVBackend`
+- **Qwen3.5-9B** -- hybrid architecture (8 full-attention + 24 DeltaNet layers), uses `Qwen35KVBackend`. Config: `configs/model/qwen35_9b_text_only.yaml`. Default study: `configs/studies/default.yaml`.
+- **Qwen3-8B** -- dense attention (36 layers), uses `Qwen3DenseKVBackend`. Config: `configs/model/qwen3_8b.yaml`. Default study: `configs/studies/default_qwen3_8b.yaml`.
+- **Qwen2.5-3B-Instruct** -- dense attention (36 layers, GQA: 16 Q / 2 KV heads, head_dim 128), uses `Qwen25DenseKVBackend`. Config: `configs/model/qwen25_3b.yaml`. Default study: `configs/studies/default_qwen25_3b.yaml`.
 
 Select the model through the `--model-config` flag or the study config YAML.
-
-> turboquant-core also ships `Qwen25DenseKVBackend` for Qwen2.5-3B-Instruct, but this harness does not bundle a Qwen2.5 model config yet. Add one analogous to `configs/model/qwen3_8b.yaml` if you want to evaluate it.
 
 ## Non-goals
 
