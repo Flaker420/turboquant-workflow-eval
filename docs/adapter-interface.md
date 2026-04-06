@@ -19,15 +19,17 @@ Your class should inherit from `CompressionAdapter` and implement:
 
 ### Optional methods (model reuse and inspection)
 
-These methods enable the study runner to reuse a single model across multiple policies instead of reloading from scratch each time. All have safe default implementations in the base class -- existing adapters continue to work without changes.
+These methods enable the study runner to reuse a single model across multiple policies instead of reloading from scratch each time. All have safe default implementations in `CompressionAdapter` -- subclasses that do not override them keep working.
 
 - `can_revert() -> bool` -- return `True` if `revert()` can undo `prepare_model()` in-place. Default: `True`
 - `revert(model) -> bool` -- undo the changes made by `prepare_model()`. Return `True` if the model is clean and reusable, `False` if a full reload is needed. Default: no-op, returns `True`
 - `get_state() -> dict` -- return current compression parameters for inspection (used by the Quick Test UI tab). Default: empty dict
-- `update_params(params) -> bool` -- hot-update compression params without full revert + reapply. Return `True` if applied, `False` if not supported. Default: returns `False`
+- `update_params(params) -> bool` -- hot-update compression params without full revert + reapply. Return `True` if applied, `False` if not supported. Default: returns `False`. **The built-in `TurboQuantAdapter` does not support hot updates and raises `NotImplementedError`** -- callers must `revert(model)` and `prepare_model(...)` again with the new settings.
 - `reset_generation_state() -> None` -- clear per-generation state (e.g. KV cache, internal buffers) before each generation attempt. Called by the study runner before every `generate_one`, including each repetition, so each attempt starts from a clean state. Default: no-op. Override this if your adapter accumulates state across generations.
 
 When `can_revert()` returns `True`, the study runner loads the model once and calls `prepare_model()` / `revert()` for each policy. When it returns `False`, the model is reloaded from scratch before each policy.
+
+> **Note on the built-in `TurboQuantAdapter` wrapper:** the wrapper at `src/turboquant_workflow_eval/adapters/turboquant.py` delegates every method directly to `turboquant_core.TurboQuantAdapter` without `hasattr` fallbacks. If a future core release renames or removes one of these methods, the wrapper will raise `AttributeError` loudly rather than silently returning a fake state. The wrapper additionally validates that `model_cfg["model_name"]` is set and raises `ValueError` early if not.
 
 ## Minimal example
 
@@ -65,10 +67,15 @@ class MyTurboQuantAdapter(CompressionAdapter):
 name: turboquant_safe
 enabled: true
 adapter:
-  import_path: my_package.my_module:MyTurboQuantAdapter
+  import_path: turboquant_workflow_eval.adapters.turboquant:TurboQuantAdapter
 settings:
-  note: conservative full-attention policy
+  bit_width: 4
+  seed: 42
+  residual_window: 0          # optional, forwarded to turboquant-core
+  key_strategy: "mse+qjl"     # optional, forwarded to turboquant-core
 ```
+
+`adapter.import_path` must match `module.path:ClassName` -- this is enforced at config load time by `validate_policy_config`. The `settings` block is passed unchanged into the adapter; for the built-in `TurboQuantAdapter` the supported keys are `bit_width`, `seed`, `residual_window`, `key_strategy`, and (for advanced use) `model_variant`. All of them are recorded in `describe()` so they appear in `run_summary.json` and per-row CSV/JSONL output.
 
 ## Important
 
@@ -81,36 +88,66 @@ This repository does not assume every backend mutates the model the same way. Th
 
 ## Wiring turboquant-core
 
-> **Note:** turboquant-core is already wired. The built-in `TurboQuantAdapter` at `src/turboquant_workflow_eval/adapters/turboquant.py` wraps the core library and is used by both policy templates. The example below is for reference if you need to write a custom adapter with different behavior.
+> **Note:** turboquant-core is already wired. The built-in `TurboQuantAdapter` at `src/turboquant_workflow_eval/adapters/turboquant.py` wraps the core library and is used by both policy templates. You should normally just point your policy at `turboquant_workflow_eval.adapters.turboquant:TurboQuantAdapter` -- write a custom adapter only if you need different behavior.
 
 [turboquant-core](https://github.com/Flaker420/turboquant-core) provides model-specific backends for KV-cache compression:
 
-| Model | Backend |
-|-------|---------|
-| Qwen3.5-9B | `Qwen35KVBackend` |
-| Qwen3-8B | `Qwen3DenseKVBackend` |
+| Model | Backend | Patch helper |
+|-------|---------|--------------|
+| Qwen3.5-9B (hybrid) | `Qwen35KVBackend` | `patch_qwen35_with_tq` |
+| Qwen3-8B (dense) | `Qwen3DenseKVBackend` | `patch_qwen3_with_tq` |
+| Qwen2.5-3B-Instruct (dense) | `Qwen25DenseKVBackend` | `patch_qwen25_with_tq` |
 
-A minimal adapter wrapping turboquant-core would look like:
+The `Qwen2.5` backend is shipped by core but **not yet wired into a bundled model config** in the harness; if you want to evaluate it, add a `configs/model/qwen25_*.yaml` analogous to `configs/model/qwen3_8b.yaml` and point a study at it.
+
+If you really do want to write your own adapter from scratch, the patch helpers are the entry point:
 
 ```python
 from turboquant_workflow_eval.adapters.base import CompressionAdapter
-from turboquant_core.backends import Qwen35KVBackend
+from turboquant_core.backends.qwen_hook import patch_qwen35_with_tq, unpatch_model
 
-class TurboQuantSafeAdapter(CompressionAdapter):
-    name = "turboquant-safe"
+
+class MyTurboQuantAdapter(CompressionAdapter):
+    name = "my-turboquant"
+
+    def __init__(self) -> None:
+        self._cache = None
+        self._patched = False
 
     def prepare_model(self, model, tokenizer, model_cfg, policy_cfg):
-        backend = Qwen35KVBackend(
-            bit_width=policy_cfg["settings"].get("bit_width", 4),
+        settings = policy_cfg.get("settings", {})
+        self._cache = patch_qwen35_with_tq(
+            model,
+            bit_width=settings.get("bit_width", 4),
+            seed=settings.get("seed", 42),
+            residual_window=settings.get("residual_window", 0),
+            key_strategy=settings.get("key_strategy", "mse+qjl"),
         )
-        model = backend.patch(model)
+        self._patched = True
         return model, tokenizer
 
+    def can_revert(self) -> bool:
+        return self._patched
+
+    def revert(self, model) -> bool:
+        if not self._patched:
+            return False
+        unpatch_model(model)
+        if self._cache is not None:
+            self._cache.clear()
+            self._cache = None
+        self._patched = False
+        return True
+
     def describe(self, policy_cfg):
+        s = policy_cfg.get("settings", {})
         return {
             "adapter": self.name,
-            "bit_width": policy_cfg["settings"].get("bit_width", 4),
+            "bit_width": s.get("bit_width", 4),
+            "seed": s.get("seed", 42),
+            "residual_window": s.get("residual_window", 0),
+            "key_strategy": s.get("key_strategy", "mse+qjl"),
         }
 ```
 
-Adjust the backend constructor arguments to match your turboquant-core version. The `prepare_model` call receives the full `policy_cfg` dict, so all `settings:` keys from the YAML are available.
+This is essentially what `turboquant_core.TurboQuantAdapter` already does -- the `TurboQuantAdapter` wrapper in this repo delegates straight to it.

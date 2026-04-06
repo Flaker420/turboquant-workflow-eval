@@ -13,6 +13,8 @@ Which compression policy is usable in my workflow, and what degrades when I push
 
 Select the model through the `--model-config` flag or the study config YAML.
 
+> turboquant-core also ships `Qwen25DenseKVBackend` for Qwen2.5-3B-Instruct, but this harness does not bundle a Qwen2.5 model config yet. Add one analogous to `configs/model/qwen3_8b.yaml` if you want to evaluate it.
+
 ## Non-goals
 
 Not in scope for the first pass:
@@ -30,9 +32,25 @@ Not in scope for the first pass:
 | **Dry run** | `--dry-run` | No | Validate all configs, paths, and adapters in <1 second |
 | **Smoke test** | `--single` | Yes | Run 1 prompt with 1 policy, 1 repetition — fast end-to-end sanity check |
 | **Full study** | (default) | Yes | Run all prompts x policies x repetitions |
-| **Re-score** | `--rescore ROWS_JSONL` | No | Recompute verdicts on existing results with different thresholds |
+| **Re-score** | `--rescore ROWS_JSONL` | No | Recompute verdicts on existing results with different thresholds; `--study-config` is optional and serves as a thresholds source |
 
 All modes support `--set KEY=VALUE` overrides and prompt filtering (`--prompt-id`, `--prompt-category`, `--prompt-filter`).
+
+## Study configuration
+
+Multi-policy studies must declare `baseline_policy_name:` in the study YAML. This names the policy whose rows are used as the comparison baseline for similarity, latency delta, and verdicts. `validate_study_config` raises a `ConfigValidationError` at load time if the field is missing on a multi-policy run. All bundled studies declare `baseline_policy_name: baseline`.
+
+## Live verdicts and early stop
+
+Verdicts are computed live as each prompt finishes — `run_policy` populates a shared baseline lookup as the baseline policy executes and stamps a real `verdict`, `semantic_similarity`, and `output_length_delta_pct` on every row before emitting `prompt_completed`. This means the early-stop controller can react to red verdicts as they happen. Two early-stop knobs are read from the study YAML's `early_stop:` block:
+
+```yaml
+early_stop:
+  max_red_verdicts: 5      # stop after this many red verdicts across all policies
+  max_error_rate: 0.5      # stop if errored / total exceeds this fraction
+```
+
+`score_results` runs at the end of the study and re-stamps the same fields idempotently.
 
 ## Deliverables
 
@@ -49,6 +67,7 @@ These are meant to be read side by side when deciding:
 - green: good enough for workflow use
 - yellow: usable with caution
 - red: too lossy or unstable
+- error: the prompt did not complete (the row carries `error: <message>`, `verdict: "error"`, and zeroed metrics)
 
 Verdicts are computed automatically by `scoring.py:compute_verdict()` using configurable thresholds defined in the study config (e.g. `configs/studies/default.yaml`). The thresholds cover latency regression, output-length delta, semantic similarity, math correctness, and code execution results. Thresholds can be set per-category (e.g. different latency tolerance for math vs coding prompts).
 
