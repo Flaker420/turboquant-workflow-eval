@@ -1,10 +1,10 @@
 PYTHONPATH := src
 export PYTHONPATH
 
-MODEL_CONFIG ?= configs/model/qwen35_9b_text_only.yaml
-EXPERIMENT_CONFIG ?= configs/experiments/preflight_stats.yaml
-STUDY_CONFIG ?= configs/studies/default_qwen35_9b.yaml
-POLICY_CONFIGS ?= configs/policies/baseline.yaml
+MODEL_CONFIG ?= configs/model/qwen35_9b_text_only.py
+EXPERIMENT_CONFIG ?= configs/experiments/preflight_stats.py
+STUDY_CONFIG ?= configs/studies/default_qwen35_9b.py
+POLICY_CONFIGS ?= configs/policies/baseline.py
 OUTPUT_DIR ?= outputs/study_run
 DOWNLOAD_OUTPUT ?= outputs/download_summary.json
 RESCORE_INPUT ?= $(OUTPUT_DIR)/rows.jsonl
@@ -50,16 +50,16 @@ preflight:
 	python scripts/run_preflight_stats.py --experiment-config $(EXPERIMENT_CONFIG) --output-dir outputs/preflight_smoke
 
 dry-run:
-	python -m turboquant_workflow_eval --study-config $(STUDY_CONFIG) --dry-run
+	python -m turboquant_workflow_eval --study $(STUDY_CONFIG) --dry-run
 
 smoke-test:
-	python -m turboquant_workflow_eval --study-config $(STUDY_CONFIG) --single --output-dir $(OUTPUT_DIR)
+	python -m turboquant_workflow_eval --study $(STUDY_CONFIG) --single --output-dir $(OUTPUT_DIR)
 
 study:
-	python scripts/run_workflow_study.py --study-config $(STUDY_CONFIG) --policy-configs $(POLICY_CONFIGS) --output-dir $(OUTPUT_DIR)
+	python scripts/run_workflow_study.py --study $(STUDY_CONFIG) --policies $(POLICY_CONFIGS) --output-dir $(OUTPUT_DIR)
 
 study-full:
-	python scripts/run_workflow_study.py --study-config configs/studies/full.yaml --policy-configs $(POLICY_CONFIGS) --output-dir $(OUTPUT_DIR)
+	python scripts/run_workflow_study.py --study configs/studies/full.py --policies $(POLICY_CONFIGS) --output-dir $(OUTPUT_DIR)
 
 rescore:
 	python -m turboquant_workflow_eval --rescore $(RESCORE_INPUT) --output-dir $(OUTPUT_DIR)

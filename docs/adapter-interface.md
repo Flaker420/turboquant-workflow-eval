@@ -63,32 +63,61 @@ class MyTurboQuantAdapter(CompressionAdapter):
 
 ## Policy config example
 
-```yaml
-name: turboquant_safe
-enabled: true
-adapter:
-  import_path: turboquant_workflow_eval.adapters.turboquant:TurboQuantAdapter
-settings:
-  bit_width: 4
-  seed: 42
-  residual_window: 0          # optional, forwarded to turboquant-core
-  key_strategy: "mse+qjl"     # optional, forwarded to turboquant-core
+Policy configs are Python modules that export a `POLICY` symbol. The loader (`src/turboquant_workflow_eval/loader.py`) imports the module and returns the dataclass instance directly.
+
+```python
+# configs/policies/safe_template.py
+from turboquant_workflow_eval.schema import (
+    AdapterSpec,
+    PolicyConfig,
+    PolicySettings,
+)
+
+POLICY = PolicyConfig(
+    name="turboquant_safe",
+    enabled=True,
+    comparison_label="safe",
+    adapter=AdapterSpec(
+        import_path="turboquant_workflow_eval.adapters.turboquant:TurboQuantAdapter"
+    ),
+    settings=PolicySettings(
+        bit_width=4,
+        seed=42,
+        residual_window=0,           # forwarded to turboquant-core
+        key_strategy="mse",          # {"mse", "mse+qjl"}
+        compressible_layers=None,    # None = backend default; or e.g. (7, 15, 23, 31)
+    ),
+    notes=("4-bit MSE key compression. Conservative default.",),
+)
 ```
 
-`adapter.import_path` must match `module.path:ClassName` -- this is enforced at config load time by `validate_policy_config`. The `settings` block is passed unchanged into the adapter; for the built-in `TurboQuantAdapter` the supported keys are `bit_width`, `seed`, `residual_window`, `key_strategy`, and (for advanced use) `model_variant`. All of them are recorded in `describe()` so they appear in `run_summary.json` and per-row CSV/JSONL output.
+`AdapterSpec.import_path` must match `module.path:ClassName` — this is enforced inside `AdapterSpec.__post_init__` (`src/turboquant_workflow_eval/schema.py`) at dataclass-construction time. The `PolicySettings` dataclass is passed to the adapter as a legacy dict via `policy_to_legacy_dict` (the runner builds it at the core seam in `src/turboquant_workflow_eval/study.py`); for the built-in `TurboQuantAdapter` the supported keys are `bit_width`, `seed`, `residual_window`, `key_strategy`, `value_strategy`, `compressible_layers`, `profile`, and (for advanced use) `model_variant`. All of them are recorded in `describe()` so they appear in `run_summary.json` and per-row CSV/JSONL output.
 
-### Overriding policy settings without editing the YAML
+### Overriding policy settings without editing the config module
 
-Any key inside a policy YAML can be overridden at load time without touching the file on disk. From the CLI:
+Every `PolicySettings` field has a dedicated CLI flag with global and per-policy variants:
 
 ```bash
-python -m turboquant_workflow_eval --study-config configs/studies/default_qwen35_9b.yaml \
+# Global — apply to every policy
+python -m turboquant_workflow_eval --study configs/studies/default_qwen35_9b.py \
+  --bit-width 8 --key-strategy mse --compressible-layers 7,15,23,31
+
+# Per-policy — target one policy by name (NAME=VALUE, repeatable)
+python -m turboquant_workflow_eval --study configs/studies/default_qwen35_9b.py \
+  --bit-width-for turboquant_safe=4 \
+  --compressible-layers-for turboquant_safe=7,15,23,31
+```
+
+For paths without a dedicated flag, two escape hatches remain:
+
+```bash
+python -m turboquant_workflow_eval --study configs/studies/default_qwen35_9b.py \
   --set-policy turboquant_safe.settings.key_strategy=mse \
   --set-policy '*.settings.bit_width=8' \
   --set-policy baseline.enabled=false
 ```
 
-The first segment is matched against `policy_cfg["name"]`; `*` matches every policy. The remaining dot-path is applied via `apply_dot_overrides`. The Gradio UI exposes the same mechanism through the **Policy Overrides** accordion on the Study Runner tab — one override per line. Overrides are applied before `validate_policy_config`, so an override that produces an invalid policy fails fast with a clear error.
+The first segment of `--set-policy` is matched against `PolicyConfig.name`; `*` matches every policy. The remaining dot-path is applied via `replace_path` (`src/turboquant_workflow_eval/schema.py`), which recursively rebuilds the frozen dataclass and re-runs `__post_init__` validation — an override that produces an invalid policy fails fast with a clear error. The Gradio UI's **Policy Overrides** accordion (currently broken pending the UI rework PR) will reuse the same mechanism.
 
 ## Important
 
