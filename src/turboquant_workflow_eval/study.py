@@ -166,6 +166,10 @@ def prepare_study(
 
     # Resolve policies
     policy_paths = _load_policy_configs(study_config_path, study_cfg, policy_configs_arg)
+    # single_mode trims to the first prompt (above) and then to the first
+    # `enabled: true` policy among policy_paths. If none are enabled, the
+    # filtered policy_paths list is left unchanged so downstream run_study
+    # will raise the existing "No enabled policies were run" error.
     if single_mode:
         first_enabled = []
         for pp in policy_paths:
@@ -174,7 +178,8 @@ def prepare_study(
                 if bool(pcfg.get("enabled", False)):
                     first_enabled.append(pp)
                     break
-            except Exception:
+            except Exception as exc:  # noqa: BLE001
+                print(f"  [WARNING] failed to load policy {pp}: {exc}")
                 continue
         if first_enabled:
             policy_paths = first_enabled
@@ -242,6 +247,7 @@ def _run_single_prompt(
     tps_stats = _aggregate_stats(tps_values)
     vram_stats = _aggregate_stats(vram_values)
 
+    settings = policy_cfg.get("settings", {})
     row: dict[str, Any] = {
         "policy_name": policy_cfg["name"],
         "comparison_label": policy_cfg.get("comparison_label", policy_cfg["name"]),
@@ -251,6 +257,8 @@ def _run_single_prompt(
         "title": prompt.title,
         "watch_for": prompt.watch_for,
         "prompt_text": prompt.prompt,
+        "residual_window": settings.get("residual_window"),
+        "key_strategy": settings.get("key_strategy"),
         **first_result,
     }
 
@@ -328,6 +336,7 @@ def run_policy(
             )
         except Exception as exc:  # noqa: BLE001
             print(f"  [WARNING] prompt {prompt.id} failed: {exc}")
+            settings = policy_cfg.get("settings", {})
             row = {
                 "policy_name": policy_cfg["name"],
                 "comparison_label": policy_cfg.get("comparison_label", policy_cfg["name"]),
@@ -337,6 +346,8 @@ def run_policy(
                 "title": prompt.title,
                 "watch_for": prompt.watch_for,
                 "prompt_text": prompt.prompt,
+                "residual_window": settings.get("residual_window"),
+                "key_strategy": settings.get("key_strategy"),
                 "output_text": f"[ERROR] {exc}",
                 "output_tokens": 0,
                 "latency_s": 0.0,
@@ -346,6 +357,13 @@ def run_policy(
                 "prompt_tokens": 0,
                 "math_correct": None,
                 "error": str(exc),
+                "verdict": "error",
+                "code_verdict": "error",
+                "code_passed": 0,
+                "code_failed": 0,
+                "code_errors": 1,
+                "semantic_similarity": None,
+                "output_length_delta_pct": 0.0,
             }
             if event_bus:
                 event_bus.emit_new("error", policy_name=policy_cfg["name"], prompt_id=prompt.id, error=str(exc))
@@ -418,7 +436,19 @@ def score_results(
             f"under baseline policy {baseline_policy_name!r}."
         )
 
+    for pid, bl in baseline_by_prompt.items():
+        if bl.get("error") and len(policy_names) > 1:
+            raise ValueError(
+                f"score_results: baseline row for prompt {pid!r} under policy "
+                f"{baseline_policy_name!r} is an error row ({bl['error']!r}); "
+                "cannot use as reference."
+            )
+
     for row in rows:
+        # Skip rescoring of error rows; their fields were set at creation time.
+        if row.get("error"):
+            continue
+
         pid = row["prompt_id"]
         bl = baseline_by_prompt.get(pid)
 

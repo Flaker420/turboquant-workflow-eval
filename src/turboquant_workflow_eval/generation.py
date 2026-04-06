@@ -20,12 +20,20 @@ def render_prompt(tokenizer: Any, prompt_text: str, turns: tuple[dict[str, str],
             messages = list(turns)
         else:
             messages = [{"role": "user", "content": prompt_text}]
-        return tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-            enable_thinking=False,
-        )
+        try:
+            return tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=False,
+            )
+        except TypeError:
+            # Tokenizer (e.g. Llama, Mistral, Gemma) does not accept enable_thinking.
+            return tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
     return prompt_text
 
 

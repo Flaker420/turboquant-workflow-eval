@@ -22,14 +22,18 @@ class TurboQuantAdapter(CompressionAdapter):
 
     def __init__(self) -> None:
         self._core = _CoreAdapter()
-        self._last_policy_cfg: dict | None = None
 
     def prepare_model(
         self, model: Any, tokenizer: Any, model_cfg: dict, policy_cfg: dict
     ) -> tuple[Any, Any]:
+        model_name = model_cfg.get("model_name")
+        if not model_name:
+            raise ValueError(
+                "model_cfg['model_name'] is required by the turboquant adapter; "
+                "check the model YAML."
+            )
         # Bridge field name: eval harness uses "model_name", core expects "name".
-        bridged_cfg = {**model_cfg, "name": model_cfg.get("model_name", "")}
-        self._last_policy_cfg = policy_cfg
+        bridged_cfg = {**model_cfg, "name": model_name}
         return self._core.prepare_model(model, tokenizer, bridged_cfg, policy_cfg)
 
     def describe(self, policy_cfg: dict) -> dict:
@@ -39,33 +43,16 @@ class TurboQuantAdapter(CompressionAdapter):
         self._core.cleanup(model)
 
     def can_revert(self) -> bool:
-        # Delegate to core if it supports the method, otherwise assume no
-        if hasattr(self._core, "can_revert"):
-            return self._core.can_revert()
-        return False
+        return self._core.can_revert()
 
     def revert(self, model: Any) -> bool:
-        if hasattr(self._core, "revert"):
-            return self._core.revert(model)
-        # Fall back to cleanup + signal reload needed
-        self._core.cleanup(model)
-        return False
+        return self._core.revert(model)
 
     def get_state(self) -> dict:
-        if hasattr(self._core, "get_state"):
-            return self._core.get_state()
-        state: dict[str, Any] = {"adapter": self.name}
-        if self._last_policy_cfg:
-            settings = self._last_policy_cfg.get("settings", {})
-            state["bit_width"] = settings.get("bit_width", "unknown")
-            state["scope"] = settings.get("scope", "unknown")
-        return state
+        return self._core.get_state()
 
     def update_params(self, params: dict) -> bool:
-        if hasattr(self._core, "update_params"):
-            return self._core.update_params(params)
-        return False
+        return self._core.update_params(params)
 
     def reset_generation_state(self) -> None:
-        if hasattr(self._core, "reset_generation_state"):
-            self._core.reset_generation_state()
+        self._core.reset_generation_state()

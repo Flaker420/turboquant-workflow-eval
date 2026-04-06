@@ -135,6 +135,7 @@ def load_yaml_with_overrides(
 
 _REQUIRED_MODEL_FIELDS = ("model_name", "dtype")
 _REQUIRED_POLICY_FIELDS = ("name", "adapter")
+_IMPORT_PATH_RE = re.compile(r"^[A-Za-z_][\w.]*:[A-Za-z_]\w*$")
 _REQUIRED_STUDY_FIELDS = ("name", "model_config", "prompt_pack", "runtime")
 _REQUIRED_RUNTIME_FIELDS = ("max_input_tokens", "max_new_tokens")
 
@@ -168,6 +169,13 @@ def validate_policy_config(cfg: dict[str, Any], path: str | Path | None = None) 
         adapter = cfg["adapter"]
         if not isinstance(adapter, dict) or "import_path" not in adapter:
             errors.append(f"policy config{label}: 'adapter' must be a dict with 'import_path'")
+        else:
+            import_path = adapter["import_path"]
+            if not isinstance(import_path, str) or not _IMPORT_PATH_RE.match(import_path):
+                errors.append(
+                    f"policy config{label}: adapter.import_path must match "
+                    f"'module.path:ClassName' (got {import_path!r})"
+                )
     return errors
 
 

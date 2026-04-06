@@ -74,6 +74,8 @@ To run a compression comparison, no additional wiring is needed -- just run the 
 
 [turboquant-core](https://github.com/Flaker420/turboquant-core) is listed in `requirements.txt` and installed automatically. The built-in `TurboQuantAdapter` (`src/turboquant_workflow_eval/adapters/turboquant.py`) wraps the core library's adapter, handling the `model_name` to `name` field normalization between the eval harness and the core library.
 
+The dependency is pinned to a specific commit SHA in both `requirements.txt` and `pyproject.toml`. To bump the pin, replace the SHA after `@` in both files with the new core commit and re-run `pip install -e .`.
+
 Both `safe_template.yaml` (bit_width 4) and `aggressive_template.yaml` (bit_width 2) are pre-configured and enabled. See `docs/adapter-interface.md` for the adapter contract if you need to write a custom adapter.
 
 ## RunPod-first design
@@ -93,7 +95,7 @@ The current validated environment for this repository is:
 - system CUDA toolkit / `nvcc`: **12.8**
 - PyTorch: **2.10.0+cu128**
 - Triton: **3.6.0**
-- native Qwen3.5 non-thinking toggle enabled through local `apply_chat_template(..., enable_thinking=False)`
+- native Qwen3.5 non-thinking toggle enabled through local `apply_chat_template(..., enable_thinking=False)` (the harness probes for tokenizer support and falls back gracefully on tokenizers that do not accept the kwarg)
 
 This is why the RunPod bootstrap installs torch separately from the base requirements. See `docs/current-runpod-state.md` for the full note and caveats.
 
