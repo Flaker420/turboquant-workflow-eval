@@ -143,10 +143,49 @@ class TestRunWorkflowStudy:
         assert summary["policy_count"] == 1
         assert summary["prompt_count"] == 1
         assert summary["row_count"] == 1
+        # Single-policy run defaults baseline to that policy for provenance.
+        assert summary["baseline_policy_name"] == "baseline"
         assert (output_dir / "rows.jsonl").exists()
         assert (output_dir / "workflow_compare.csv").exists()
         assert (output_dir / "run_summary.json").exists()
         assert (output_dir / "examples.md").exists()
+        on_disk = json.loads((output_dir / "run_summary.json").read_text())
+        assert on_disk["baseline_policy_name"] == "baseline"
+
+    @patch("turboquant_workflow_eval.study.load_model_and_tokenizer")
+    @patch("turboquant_workflow_eval.study.generate_one")
+    def test_baseline_policy_name_in_summary_multi_policy(
+        self, mock_gen, mock_load, tmp_path: Path
+    ) -> None:
+        """Multi-policy study records the explicit baseline_policy_name."""
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        mock_load.return_value = (mock_model, mock_tokenizer, "MockLoader")
+        mock_gen.side_effect = self._mock_generate_one
+
+        study_path = self._create_study_files(tmp_path)
+        # Add a second enabled policy and an explicit baseline name.
+        policy_dir = tmp_path / "configs" / "policies"
+        second = {
+            "name": "compressed",
+            "enabled": True,
+            "comparison_label": "compressed",
+            "adapter": {
+                "import_path": "turboquant_workflow_eval.adapters.none:NoCompressionAdapter",
+            },
+            "settings": {},
+        }
+        (policy_dir / "compressed.yaml").write_text(yaml.dump(second))
+        study_cfg = yaml.safe_load(study_path.read_text())
+        study_cfg["policy_configs"].append("../policies/compressed.yaml")
+        study_cfg["baseline_policy_name"] = "baseline"
+        study_path.write_text(yaml.dump(study_cfg))
+
+        output_dir = tmp_path / "outputs"
+        summary = run_workflow_study(study_path, output_dir)
+        assert summary["baseline_policy_name"] == "baseline"
+        on_disk = json.loads((output_dir / "run_summary.json").read_text())
+        assert on_disk["baseline_policy_name"] == "baseline"
 
     @patch("turboquant_workflow_eval.study.load_model_and_tokenizer")
     @patch("turboquant_workflow_eval.study.generate_one")
