@@ -5,6 +5,7 @@ adapter:
   import_path: turboquant_workflow_eval.adapters.turboquant:TurboQuantAdapter
 settings:
   bit_width: 2
+  key_strategy: mse
   profile: aggressive
 notes:
   - Stress profile — run after the safe policy is validated.
