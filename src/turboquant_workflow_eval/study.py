@@ -437,7 +437,7 @@ def score_results(
         )
 
     for pid, bl in baseline_by_prompt.items():
-        if bl.get("error"):
+        if bl.get("error") and len(policy_names) > 1:
             raise ValueError(
                 f"score_results: baseline row for prompt {pid!r} under policy "
                 f"{baseline_policy_name!r} is an error row ({bl['error']!r}); "
