@@ -8,7 +8,7 @@ Which compression policy is usable in my workflow, and what degrades when I push
 
 ## Supported models
 
-- **Qwen3.5-9B** -- hybrid architecture (8 full-attention + 24 DeltaNet layers), uses `Qwen35KVBackend`. Config: `configs/model/qwen35_9b_text_only.yaml`. Default study: `configs/studies/default_qwen35_9b.yaml` (also reachable as `configs/studies/default.yaml`, a symlink kept for backwards compatibility).
+- **Qwen3.5-9B** -- hybrid architecture (8 full-attention + 24 DeltaNet layers), uses `Qwen35KVBackend`. Config: `configs/model/qwen35_9b_text_only.yaml`. Default study: `configs/studies/default_qwen35_9b.yaml`.
 - **Qwen3-8B** -- dense attention (36 layers), uses `Qwen3DenseKVBackend`. Config: `configs/model/qwen3_8b.yaml`. Default study: `configs/studies/default_qwen3_8b.yaml`.
 - **Qwen2.5-3B-Instruct** -- dense attention (36 layers, GQA: 16 Q / 2 KV heads, head_dim 128), uses `Qwen25DenseKVBackend`. Config: `configs/model/qwen25_3b.yaml`. Default study: `configs/studies/default_qwen25_3b.yaml`.
 
@@ -68,6 +68,6 @@ These are meant to be read side by side when deciding:
 - red: too lossy or unstable
 - error: the prompt did not complete (the row carries `error: <message>`, `verdict: "error"`, and zeroed metrics)
 
-Verdicts are computed automatically by `scoring.py:compute_verdict()` using configurable thresholds defined in the study config (e.g. `configs/studies/default.yaml`). The thresholds cover latency regression, output-length delta, semantic similarity, math correctness, and code execution results. Thresholds can be set per-category (e.g. different latency tolerance for math vs coding prompts).
+Verdicts are computed automatically by `scoring.py:compute_verdict()` using configurable thresholds defined in the study config (e.g. `configs/studies/default_qwen35_9b.yaml`). The thresholds cover latency regression, output-length delta, semantic similarity, math correctness, and code execution results. Thresholds can be set per-category (e.g. different latency tolerance for math vs coding prompts).
 
 Results can be re-scored with `--rescore` or the **Re-Score** tab in the Gradio UI without re-running inference.

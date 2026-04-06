@@ -82,7 +82,7 @@ settings:
 Any key inside a policy YAML can be overridden at load time without touching the file on disk. From the CLI:
 
 ```bash
-python -m turboquant_workflow_eval --study-config configs/studies/default.yaml \
+python -m turboquant_workflow_eval --study-config configs/studies/default_qwen35_9b.yaml \
   --set-policy turboquant_safe.settings.key_strategy=mse \
   --set-policy '*.settings.bit_width=8' \
   --set-policy baseline.enabled=false

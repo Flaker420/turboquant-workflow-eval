@@ -31,7 +31,7 @@ categories:
   that tells the reviewer what to look for when comparing outputs
   (`prompts/workflow_prompts.yaml:5–6`).
 - **Deterministic generation.** The study config sets `temperature: 0.0` and
-  `do_sample: false` (`configs/studies/default.yaml:10–11`), which eliminates
+  `do_sample: false` (`configs/studies/default_qwen35_9b.yaml:10–11`), which eliminates
   sampling variance and makes policy-to-policy comparisons reproducible.
 
 **Weaknesses:**
@@ -98,7 +98,7 @@ it guarantees that results always reflect the current code and model state.
    noise from the first real measurement.
 
 2. ~~**Single run per prompt.**~~ **Resolved.** The study config now supports a
-   `repetitions` parameter (default 3 per `configs/studies/default.yaml:16`).
+   `repetitions` parameter (default 3 per `configs/studies/default_qwen35_9b.yaml:16`).
    Additional repetitions collect latency, tokens/sec, and VRAM measurements
    (`study.py:118–124`), and the results include per-metric mean and standard
    deviation via `_aggregate_stats()` (`study.py:27–36`).
@@ -192,7 +192,7 @@ The evaluation layer originally identified as absent has been implemented:
   `scoring.py:compute_verdict()` aggregates latency regression, output-length
   delta, semantic similarity, math correctness, and code execution results
   into a single `verdict` per row. Thresholds are configurable in the study
-  config (`configs/studies/default.yaml:19–25`).
+  config (`configs/studies/default_qwen35_9b.yaml:19–25`).
 
 **Remaining gaps:**
 

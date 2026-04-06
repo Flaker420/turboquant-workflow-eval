@@ -21,7 +21,7 @@ This repository is the evaluation counterpart to [turboquant-core](https://githu
 | Qwen3-8B | `configs/model/qwen3_8b.yaml` | `Qwen3DenseKVBackend` |
 | Qwen2.5-3B-Instruct | `configs/model/qwen25_3b.yaml` | `Qwen25DenseKVBackend` |
 
-All three models work with the same evaluation pipeline. Select the model by passing a different `--model-config` to the scripts or by editing the study/experiment config. Bundled study configs: `configs/studies/default.yaml` (Qwen3.5-9B), `configs/studies/default_qwen3_8b.yaml`, `configs/studies/default_qwen25_3b.yaml`.
+All three models work with the same evaluation pipeline. Select the model by passing a different `--model-config` to the scripts or by editing the study/experiment config. Bundled study configs: `configs/studies/default_qwen35_9b.yaml` (Qwen3.5-9B), `configs/studies/default_qwen3_8b.yaml`, `configs/studies/default_qwen25_3b.yaml`.
 
 ## Ready-to-run status
 
@@ -164,7 +164,7 @@ pytest -q
 Before committing GPU hours, verify that all configs, paths, and adapters resolve correctly:
 
 ```bash
-python -m turboquant_workflow_eval --study-config configs/studies/default.yaml --dry-run
+python -m turboquant_workflow_eval --study-config configs/studies/default_qwen35_9b.yaml --dry-run
 ```
 
 This runs in <1 second and prints an execution plan showing how many prompts, policies, and total generations would run.
@@ -193,7 +193,7 @@ Or with the CLI directly:
 
 ```bash
 python -m turboquant_workflow_eval \
-  --study-config configs/studies/default.yaml \
+  --study-config configs/studies/default_qwen35_9b.yaml \
   --single --prompt-id math_01
 ```
 
@@ -345,18 +345,18 @@ The `python -m turboquant_workflow_eval` entry point (and `scripts/run_workflow_
 
 ```bash
 # Validate before committing GPU hours
-python -m turboquant_workflow_eval --study-config configs/studies/default.yaml --dry-run
+python -m turboquant_workflow_eval --study-config configs/studies/default_qwen35_9b.yaml --dry-run
 
 # Quick smoke test with one math prompt
-python -m turboquant_workflow_eval --study-config configs/studies/default.yaml \
+python -m turboquant_workflow_eval --study-config configs/studies/default_qwen35_9b.yaml \
   --single --prompt-id math_01
 
 # Override max tokens and repetitions from CLI
-python -m turboquant_workflow_eval --study-config configs/studies/default.yaml \
+python -m turboquant_workflow_eval --study-config configs/studies/default_qwen35_9b.yaml \
   --set runtime.max_new_tokens=64 --repetitions 5
 
 # Run only coding prompts
-python -m turboquant_workflow_eval --study-config configs/studies/default.yaml \
+python -m turboquant_workflow_eval --study-config configs/studies/default_qwen35_9b.yaml \
   --prompt-category coding
 
 # Re-score existing results with looser latency threshold
@@ -365,11 +365,11 @@ python -m turboquant_workflow_eval \
   --set thresholds.latency_red_pct=50
 
 # Force every policy to use plain MSE (no QJL) without editing YAML
-python -m turboquant_workflow_eval --study-config configs/studies/default.yaml \
+python -m turboquant_workflow_eval --study-config configs/studies/default_qwen35_9b.yaml \
   --set-policy '*.settings.key_strategy=mse'
 
 # Tweak only the safe policy: 8-bit, MSE-only
-python -m turboquant_workflow_eval --study-config configs/studies/default.yaml \
+python -m turboquant_workflow_eval --study-config configs/studies/default_qwen35_9b.yaml \
   --set-policy turboquant_safe.settings.bit_width=8 \
   --set-policy turboquant_safe.settings.key_strategy=mse
 ```

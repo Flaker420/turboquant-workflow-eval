@@ -15,7 +15,7 @@ from turboquant_workflow_eval.study import run_workflow_study
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the workflow comparison study.")
-    parser.add_argument("--study-config", default="configs/studies/default.yaml")
+    parser.add_argument("--study-config", default="configs/studies/default_qwen35_9b.yaml")
     parser.add_argument("--policy-configs", default=None, help="Comma-separated policy config paths.")
     parser.add_argument("--model-config", default=None, help="Override the model config from the study YAML.")
     parser.add_argument("--output-dir", default="outputs/study_run")
