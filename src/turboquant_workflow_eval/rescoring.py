@@ -6,19 +6,80 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .config import apply_dot_overrides, load_yaml
 from .reporting import write_csv, write_examples_markdown, write_run_summary
-from .scoring import compute_verdict
+from .study import score_results
+
+
+def _load_run_summary(rows_jsonl_path: Path) -> dict | None:
+    summary_path = rows_jsonl_path.parent / "run_summary.json"
+    if not summary_path.exists():
+        return None
+    try:
+        return json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _resolve_thresholds(
+    study_config: str | Path | None,
+    overrides: list[str] | None,
+) -> dict[str, Any]:
+    """Resolve thresholds from optional study config + dot-overrides.
+
+    Overrides may be in either form:
+        thresholds.latency_red_pct=50      (nested)
+        latency_red_pct=50                 (flat)
+    Both end up in the returned flat thresholds dict.
+    """
+    base: dict[str, Any] = {}
+    if study_config:
+        study_cfg = load_yaml(study_config)
+        base = dict(study_cfg.get("thresholds") or {})
+
+    if overrides:
+        # Apply against {"thresholds": base} so dot-overrides like
+        # `thresholds.latency_red_pct=50` work, then unwrap. Flat overrides
+        # (without the `thresholds.` prefix) are also accepted by injecting
+        # them under that key first.
+        wrapped = {"thresholds": base}
+        normalized: list[str] = []
+        for item in overrides:
+            if "=" not in item:
+                raise ValueError(f"Override must be key=value, got {item!r}")
+            key, value = item.split("=", 1)
+            key = key.strip()
+            if not key.startswith("thresholds."):
+                key = f"thresholds.{key}"
+            normalized.append(f"{key}={value}")
+        wrapped = apply_dot_overrides(wrapped, normalized)
+        base = dict(wrapped.get("thresholds") or {})
+
+    return base
 
 
 def rescore(
     rows_jsonl_path: str | Path,
     thresholds: dict[str, Any] | None = None,
     output_dir: str | Path | None = None,
+    study_config: str | Path | None = None,
+    overrides: list[str] | None = None,
+    baseline_policy_name: str | None = None,
 ) -> list[dict]:
-    """Load rows from JSONL, recompute verdicts with *thresholds*, and
-    optionally rewrite output artefacts.
+    """Load rows from JSONL, recompute verdicts with refreshed thresholds.
 
-    Returns the re-scored rows.  No model loading, no GPU — pure computation.
+    Resolution order for thresholds (later wins):
+        1. ``study_config`` YAML's ``thresholds`` block (if provided)
+        2. explicit ``thresholds`` argument
+        3. ``overrides`` (dot-notation, e.g. ``thresholds.latency_red_pct=50``
+           or the bare ``latency_red_pct=50``)
+
+    Baseline policy resolution:
+        1. ``baseline_policy_name`` argument
+        2. ``baseline_policy_name`` from a sibling ``run_summary.json``
+        3. single-policy auto-detect (handled by ``score_results``)
+
+    Always emits a refreshed ``run_summary.json`` next to the rescored rows.
     """
     rows_jsonl_path = Path(rows_jsonl_path)
     rows: list[dict] = []
@@ -31,51 +92,66 @@ def rescore(
     if not rows:
         raise RuntimeError(f"No rows found in {rows_jsonl_path}")
 
-    # Rebuild baseline lookup
-    baseline_by_prompt: dict[str, dict] = {}
-    for row in rows:
-        pid = row["prompt_id"]
-        if pid not in baseline_by_prompt:
-            baseline_by_prompt[pid] = row
+    resolved_thresholds = _resolve_thresholds(study_config, overrides)
+    if thresholds:
+        resolved_thresholds.update(thresholds)
 
-    # Recompute verdicts
+    prior_summary = _load_run_summary(rows_jsonl_path)
+    if baseline_policy_name is None and prior_summary:
+        baseline_policy_name = prior_summary.get("baseline_policy_name")
+
     old_verdicts = {(r["policy_name"], r["prompt_id"]): r.get("verdict") for r in rows}
-    for row in rows:
-        pid = row["prompt_id"]
-        bl = baseline_by_prompt.get(pid)
-        row["verdict"] = compute_verdict(row, bl if bl is not row else None, thresholds)
 
-    # Report changes
+    score_results(
+        rows,
+        thresholds_cfg=resolved_thresholds or None,
+        baseline_policy_name=baseline_policy_name,
+    )
+
     changed = 0
     for row in rows:
         key = (row["policy_name"], row["prompt_id"])
         if old_verdicts.get(key) != row.get("verdict"):
             changed += 1
             print(f"  {key[0]}:{key[1]}: {old_verdicts.get(key)} -> {row['verdict']}")
-
     print(f"\nRe-scored {len(rows)} rows, {changed} verdict(s) changed.")
 
-    # Write outputs if requested
+    target_dir = Path(output_dir) if output_dir else rows_jsonl_path.parent
+    target_dir.mkdir(parents=True, exist_ok=True)
+
     if output_dir:
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        # Write rescored JSONL
-        with (output_dir / "rows.jsonl").open("w", encoding="utf-8") as f:
+        with (target_dir / "rows.jsonl").open("w", encoding="utf-8") as f:
             for row in rows:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
-        write_csv(output_dir / "workflow_compare.csv", rows)
-        write_examples_markdown(output_dir / "examples.md", rows)
-
-        verdict_counts = {"green": 0, "yellow": 0, "red": 0}
-        for row in rows:
-            v = row.get("verdict", "green")
-            verdict_counts[v] = verdict_counts.get(v, 0) + 1
-        print(f"Verdicts: {verdict_counts}")
-        print(f"Rescored outputs written to: {output_dir}")
     else:
-        # Overwrite original JSONL in-place
         with rows_jsonl_path.open("w", encoding="utf-8") as f:
             for row in rows:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    write_csv(target_dir / "workflow_compare.csv", rows)
+    write_examples_markdown(target_dir / "examples.md", rows)
+
+    verdict_counts = {"green": 0, "yellow": 0, "red": 0}
+    for row in rows:
+        v = row.get("verdict", "green")
+        verdict_counts[v] = verdict_counts.get(v, 0) + 1
+
+    summary: dict[str, Any] = dict(prior_summary or {})
+    summary.update(
+        {
+            "row_count": len(rows),
+            "verdict_summary": verdict_counts,
+            "baseline_policy_name": baseline_policy_name
+            or summary.get("baseline_policy_name"),
+            "rescored": True,
+            "rescore_thresholds": resolved_thresholds,
+            "rescore_verdicts_changed": changed,
+            "output_dir": str(target_dir),
+        }
+    )
+    write_run_summary(target_dir / "run_summary.json", summary)
+
+    print(f"Verdicts: {verdict_counts}")
+    print(f"Rescored outputs written to: {target_dir}")
 
     return rows

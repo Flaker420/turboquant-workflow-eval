@@ -1,6 +1,7 @@
 name: turboquant_workflow_eval_qwen3_8b
 model_config: ../model/qwen3_8b.yaml
 prompt_pack: ../../prompts/workflow_prompts.yaml
+baseline_policy_name: baseline
 policy_configs:
   - ../policies/baseline.yaml
   - ../policies/safe_template.yaml

@@ -193,6 +193,14 @@ def validate_study_config(cfg: dict[str, Any], path: str | Path | None = None) -
                 errors.append(f"study config{label}: runtime missing required field '{field}'")
     else:
         errors.append(f"study config{label}: 'runtime' must be a mapping")
+
+    policy_configs = cfg.get("policy_configs") or []
+    if isinstance(policy_configs, list) and len(policy_configs) > 1:
+        if not cfg.get("baseline_policy_name"):
+            errors.append(
+                f"study config{label}: 'baseline_policy_name' is required when "
+                f"more than one policy_config is listed (got {len(policy_configs)})."
+            )
     return errors
 
 

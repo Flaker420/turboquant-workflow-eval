@@ -5,7 +5,6 @@ adapter:
   import_path: turboquant_workflow_eval.adapters.turboquant:TurboQuantAdapter
 settings:
   bit_width: 2
-  scope: full_attention_only
   profile: aggressive
 notes:
   - Stress profile — run after the safe policy is validated.

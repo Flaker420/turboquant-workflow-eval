@@ -3,6 +3,7 @@ model_config: ../model/qwen35_9b_text_only.yaml
 prompt_pack:
   - ../../prompts/workflow_prompts.yaml
   - ../../prompts/generated_long_context.yaml
+baseline_policy_name: baseline
 policy_configs:
   - ../policies/baseline.yaml
   - ../policies/safe_template.yaml

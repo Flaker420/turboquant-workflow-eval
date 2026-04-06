@@ -306,8 +306,22 @@ def run_policy(
     total_policies: int = 1,
     event_bus: EventBus | None = None,
     controller: StudyController | None = None,
+    baseline_by_prompt: dict[str, dict] | None = None,
 ) -> list[dict]:
-    """Run all prompts for one policy and return result rows."""
+    """Run all prompts for one policy and return result rows.
+
+    If *baseline_by_prompt* is provided, each row receives a provisional
+    verdict (and provisional ``output_length_delta_pct`` /
+    ``semantic_similarity``) immediately after generation. This lets the
+    early-stop controller and ``prompt_completed`` events fire on a real
+    verdict instead of ``None``. ``score_results`` is still called at the
+    end of the study to (idempotently) finalize the same fields.
+    """
+    is_baseline_policy = (
+        baseline_by_prompt is not None
+        and policy_cfg.get("name") == ctx.baseline_policy_name
+    )
+    thresholds_cfg = ctx.thresholds_cfg
     rows: list[dict] = []
 
     if event_bus:
@@ -367,6 +381,29 @@ def run_policy(
             }
             if event_bus:
                 event_bus.emit_new("error", policy_name=policy_cfg["name"], prompt_id=prompt.id, error=str(exc))
+
+        # Provisional scoring so early-stop and prompt_completed events
+        # see a real verdict before score_results runs at the end.
+        if baseline_by_prompt is not None and not row.get("error"):
+            if is_baseline_policy:
+                baseline_by_prompt.setdefault(prompt.id, row)
+            bl = baseline_by_prompt.get(prompt.id)
+            bl_tokens = bl["output_tokens"] if bl else 0
+            if bl_tokens and bl_tokens > 0:
+                row["output_length_delta_pct"] = (
+                    (row["output_tokens"] - bl_tokens) / bl_tokens
+                ) * 100
+            else:
+                row["output_length_delta_pct"] = 0.0
+            if bl and bl is not row:
+                row["semantic_similarity"] = compute_semantic_similarity(
+                    bl["output_text"], row["output_text"]
+                )
+            else:
+                row["semantic_similarity"] = None
+            row["verdict"] = compute_verdict(
+                row, bl if bl is not row else None, thresholds_cfg
+            )
 
         rows.append(row)
         if writer:
@@ -578,6 +615,9 @@ def run_workflow_study(
 
     rows: list[dict] = []
     policies_used: list[dict] = []
+    # Shared baseline lookup for provisional verdicts inside run_policy.
+    # Populated as the baseline policy executes; consulted by every policy.
+    baseline_by_prompt: dict[str, dict] = {}
 
     # --- Load model once, reuse across policies ---
     model = None
@@ -630,6 +670,7 @@ def run_workflow_study(
             total_policies=len(ctx.policy_paths),
             event_bus=event_bus,
             controller=controller,
+            baseline_by_prompt=baseline_by_prompt,
         )
         rows.extend(policy_rows)
 
