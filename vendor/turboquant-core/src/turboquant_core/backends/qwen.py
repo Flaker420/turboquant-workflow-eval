@@ -9,6 +9,7 @@ V → TQ_MSE only (weighted average, no inner product to debias)
 """
 
 import math
+from typing import Iterable, Sequence
 
 from ..core import (
     CodebookRegistry, RotationCache, QJLProjection,
@@ -30,7 +31,8 @@ class Qwen35KVBackend:
                  device: torch.device = torch.device("cpu"), *,
                  num_layers: int = 32, full_attn_interval: int = 4,
                  kv_heads: int = 4, head_dim: int = 256,
-                 key_strategy: str = "mse+qjl", value_strategy: str = "mse"):
+                 key_strategy: str = "mse+qjl", value_strategy: str = "mse",
+                 compressible_layers: Sequence[int] | None = None):
         _validate_strategies(key_strategy, value_strategy)
         self.num_layers = num_layers
         self.full_attn_interval = full_attn_interval
@@ -40,8 +42,14 @@ class Qwen35KVBackend:
         self.value_strategy = value_strategy
         self.bit_width = bit_width
 
-        self.ga_indices = {i for i in range(num_layers)
-                          if (i + 1) % full_attn_interval == 0}
+        default_ga = {i for i in range(num_layers)
+                      if (i + 1) % full_attn_interval == 0}
+        self.ga_indices = _resolve_compressible_layers(
+            compressible_layers, default_ga, num_layers,
+            backend_name="Qwen35KVBackend",
+            require_subset_of_default=True,
+        )
+        self.compressible_layers = sorted(self.ga_indices)
         d = head_dim
 
         if key_strategy == "mse+qjl":
@@ -119,7 +127,8 @@ class Qwen3DenseKVBackend:
     def __init__(self, bit_width: int = 4, seed: int = 42,
                  device: torch.device = torch.device("cpu"), *,
                  num_layers: int = 36, kv_heads: int = 8, head_dim: int = 128,
-                 key_strategy: str = "mse+qjl", value_strategy: str = "mse"):
+                 key_strategy: str = "mse+qjl", value_strategy: str = "mse",
+                 compressible_layers: Sequence[int] | None = None):
         _validate_strategies(key_strategy, value_strategy)
         self.num_layers = num_layers
         self.kv_heads = kv_heads
@@ -127,6 +136,13 @@ class Qwen3DenseKVBackend:
         self.key_strategy = key_strategy
         self.value_strategy = value_strategy
         self.bit_width = bit_width
+
+        self.ga_indices = _resolve_compressible_layers(
+            compressible_layers, set(range(num_layers)), num_layers,
+            backend_name="Qwen3DenseKVBackend",
+            require_subset_of_default=False,
+        )
+        self.compressible_layers = sorted(self.ga_indices)
 
         d = head_dim
         if key_strategy == "mse+qjl":
@@ -140,7 +156,7 @@ class Qwen3DenseKVBackend:
         self.v_rot = RotationCache.get(d, seed + 100, device)
 
     def is_compressible(self, layer_idx: int) -> bool:
-        return True  # All layers have KV cache
+        return layer_idx in self.ga_indices
 
     def compress(self, K, V, layer_idx):
         b, nh, sl, hd = K.shape
@@ -204,7 +220,8 @@ class Qwen25DenseKVBackend:
     def __init__(self, bit_width: int = 4, seed: int = 42,
                  device: torch.device = torch.device("cpu"), *,
                  num_layers: int = 36, kv_heads: int = 2, head_dim: int = 128,
-                 key_strategy: str = "mse+qjl", value_strategy: str = "mse"):
+                 key_strategy: str = "mse+qjl", value_strategy: str = "mse",
+                 compressible_layers: Sequence[int] | None = None):
         _validate_strategies(key_strategy, value_strategy)
         self.num_layers = num_layers
         self.kv_heads = kv_heads
@@ -212,6 +229,13 @@ class Qwen25DenseKVBackend:
         self.key_strategy = key_strategy
         self.value_strategy = value_strategy
         self.bit_width = bit_width
+
+        self.ga_indices = _resolve_compressible_layers(
+            compressible_layers, set(range(num_layers)), num_layers,
+            backend_name="Qwen25DenseKVBackend",
+            require_subset_of_default=False,
+        )
+        self.compressible_layers = sorted(self.ga_indices)
 
         d = head_dim
         if key_strategy == "mse+qjl":
@@ -225,7 +249,7 @@ class Qwen25DenseKVBackend:
         self.v_rot = RotationCache.get(d, seed + 100, device)
 
     def is_compressible(self, layer_idx: int) -> bool:
-        return True  # All layers have KV cache
+        return layer_idx in self.ga_indices
 
     def compress(self, K, V, layer_idx):
         b, nh, sl, hd = K.shape
@@ -285,3 +309,60 @@ def _validate_strategies(key_strategy: str, value_strategy: str):
             f"Invalid value_strategy {value_strategy!r}. "
             f"Must be one of {_VALID_VALUE_STRATEGIES}"
         )
+
+
+def _resolve_compressible_layers(
+    user_value: Sequence[int] | None,
+    default_indices: Iterable[int],
+    num_layers: int,
+    *,
+    backend_name: str,
+    require_subset_of_default: bool,
+) -> set[int]:
+    """Validate and normalize a user-supplied ``compressible_layers`` list.
+
+    When ``user_value`` is None, returns the default index set unchanged.
+    Otherwise, validates each entry against the per-backend constraints and
+    returns the normalized set. Raises ValueError on any invalid input.
+    """
+    default_set = set(default_indices)
+    if user_value is None:
+        return default_set
+
+    seen: set[int] = set()
+    bad_type: list = []
+    bad_range: list[int] = []
+    bad_subset: list[int] = []
+    for idx in user_value:
+        if isinstance(idx, bool) or not isinstance(idx, int):
+            bad_type.append(idx)
+            continue
+        if idx < 0 or idx >= num_layers:
+            bad_range.append(idx)
+            continue
+        if require_subset_of_default and idx not in default_set:
+            bad_subset.append(idx)
+            continue
+        seen.add(idx)
+
+    if bad_type:
+        raise ValueError(
+            f"{backend_name}: compressible_layers must contain ints; "
+            f"got non-int entries {bad_type!r}."
+        )
+    if bad_range:
+        raise ValueError(
+            f"{backend_name}: compressible_layers indices {sorted(set(bad_range))} "
+            f"are out of range [0, {num_layers})."
+        )
+    if bad_subset:
+        raise ValueError(
+            f"{backend_name}: compressible_layers indices {sorted(set(bad_subset))} "
+            f"are not GatedAttn layers (DeltaNet has no KV cache to compress). "
+            f"Valid GatedAttn indices for this backend: {sorted(default_set)}."
+        )
+    if not seen:
+        raise ValueError(
+            f"{backend_name}: compressible_layers must be non-empty when provided."
+        )
+    return seen

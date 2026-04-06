@@ -10,7 +10,8 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from turboquant_workflow_eval.config import load_yaml
+from turboquant_workflow_eval.loader import load_model_module
+from turboquant_workflow_eval.schema import model_to_legacy_dict
 from turboquant_workflow_eval.download import (
     check_cache_status,
     discover_model_configs,
@@ -24,8 +25,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Download models and tokenizers into the HuggingFace cache.",
     )
-    parser.add_argument("--model-config", default="configs/model/qwen35_9b_text_only.yaml",
-                        help="Path to a single model config YAML.")
+    parser.add_argument("--model-config", default="configs/model/qwen35_9b_text_only.py",
+                        help="Path to a single model config Python module.")
     parser.add_argument("--all", action="store_true", dest="download_all",
                         help="Download all models found in configs/model/.")
     parser.add_argument("--check-only", action="store_true",
@@ -89,7 +90,7 @@ def main() -> None:
         return
 
     # Single model download (backward compatible)
-    model_cfg = load_yaml(args.model_config)
+    model_cfg = model_to_legacy_dict(load_model_module(args.model_config))
     result = download_one(
         model_cfg,
         tokenizer_only=args.tokenizer_only,

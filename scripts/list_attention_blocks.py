@@ -10,24 +10,27 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from turboquant_workflow_eval.config import load_yaml
+from turboquant_workflow_eval.loader import load_model_module
 from turboquant_workflow_eval.model_loader import load_model_and_tokenizer, resolve_language_model_root
 from turboquant_workflow_eval.module_discovery import discover_attention_blocks
+from turboquant_workflow_eval.schema import model_to_legacy_dict
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="List discovered attention blocks for the configured model.")
-    parser.add_argument("--model-config", default="configs/model/qwen35_9b_text_only.yaml")
+    parser.add_argument("--model-config", default="configs/model/qwen35_9b_text_only.py")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
 
-    model_cfg = load_yaml(args.model_config)
+    model_dc = load_model_module(args.model_config)
+    model_cfg = model_to_legacy_dict(model_dc)
     model, _tokenizer, loader_name = load_model_and_tokenizer(model_cfg)
     lm_root = resolve_language_model_root(model)
-    blocks = discover_attention_blocks(lm_root, expected_count=model_cfg["layout"]["attention_blocks"])
+    expected_count = model_dc.layout.attention_blocks if model_dc.layout else None
+    blocks = discover_attention_blocks(lm_root, expected_count=expected_count)
 
     payload = {
-        "model_name": model_cfg["model_name"],
+        "model_name": model_dc.model_name,
         "loader": loader_name,
         "language_model_root": lm_root.__class__.__name__,
         "attention_blocks": [block.to_dict() for block in blocks],

@@ -5,7 +5,24 @@ from types import SimpleNamespace
 import pytest
 
 from turboquant_workflow_eval.adapters.base import CompressionAdapter
+from turboquant_workflow_eval.schema import (
+    AdapterSpec,
+    PolicyConfig,
+    PolicySettings,
+    RuntimeConfig,
+)
 from turboquant_workflow_eval.study import _run_single_prompt, score_results
+
+
+def _baseline_policy() -> PolicyConfig:
+    return PolicyConfig(
+        name="baseline",
+        adapter=AdapterSpec(import_path="m:C"),
+        settings=PolicySettings(),
+    )
+
+
+_RUNTIME = RuntimeConfig(max_input_tokens=512, max_new_tokens=64)
 
 
 class CountingAdapter(CompressionAdapter):
@@ -59,9 +76,9 @@ class TestResetGenerationState:
             model=None,
             tokenizer=None,
             prompt=_make_prompt("p1"),
-            policy_cfg={"name": "baseline"},
+            policy=_baseline_policy(),
             adapter=adapter,
-            runtime_cfg={},
+            runtime=_RUNTIME,
             repetitions=3,
         )
         assert adapter.reset_calls == 3
@@ -76,9 +93,9 @@ class TestResetGenerationState:
                 model=None,
                 tokenizer=None,
                 prompt=_make_prompt(pid),
-                policy_cfg={"name": "baseline"},
+                policy=_baseline_policy(),
                 adapter=adapter,
-                runtime_cfg={},
+                runtime=_RUNTIME,
                 repetitions=2,
             )
         assert adapter.reset_calls == 4
