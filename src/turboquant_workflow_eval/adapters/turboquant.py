@@ -65,3 +65,7 @@ class TurboQuantAdapter(CompressionAdapter):
         if hasattr(self._core, "update_params"):
             return self._core.update_params(params)
         return False
+
+    def reset_generation_state(self) -> None:
+        if hasattr(self._core, "reset_generation_state"):
+            self._core.reset_generation_state()

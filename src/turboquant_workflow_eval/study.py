@@ -204,6 +204,7 @@ def prepare_study(
         thresholds_cfg=thresholds_cfg,
         output_dir=output_dir,
         repetitions=repetitions,
+        baseline_policy_name=study_cfg.get("baseline_policy_name"),
     )
 
 
@@ -221,6 +222,7 @@ def _run_single_prompt(
     repetitions: int,
 ) -> dict[str, Any]:
     """Run a single prompt through the model and collect metrics."""
+    adapter.reset_generation_state()
     first_result = generate_one(model, tokenizer, prompt.prompt, runtime_cfg, turns=prompt.turns)
 
     latencies = [first_result["latency_s"]]
@@ -228,6 +230,7 @@ def _run_single_prompt(
     vram_values = [first_result["peak_vram_gb"]] if first_result["peak_vram_gb"] is not None else []
 
     for _ in range(repetitions - 1):
+        adapter.reset_generation_state()
         rep_result = generate_one(model, tokenizer, prompt.prompt, runtime_cfg, turns=prompt.turns)
         latencies.append(rep_result["latency_s"])
         if rep_result["tokens_per_second"] is not None:
@@ -370,16 +373,50 @@ def run_policy(
 # Phase 4: Post-processing (scoring, verdicts)
 # ---------------------------------------------------------------------------
 
-def score_results(rows: list[dict], thresholds_cfg: dict | None = None) -> list[dict]:
+def score_results(
+    rows: list[dict],
+    thresholds_cfg: dict | None = None,
+    baseline_policy_name: str | None = None,
+) -> list[dict]:
     """Compute baseline deltas, similarity, and verdicts on existing rows.
 
     Mutates *rows* in-place and returns them for convenience.
+
+    The baseline row for each prompt is selected by *baseline_policy_name*.
+    If only one policy is present in *rows*, that policy is used as the
+    baseline by default. Otherwise *baseline_policy_name* is required.
     """
+    policy_names = {row.get("policy_name") for row in rows if row.get("policy_name")}
+
+    if baseline_policy_name is None:
+        if len(policy_names) == 1:
+            baseline_policy_name = next(iter(policy_names))
+        else:
+            raise ValueError(
+                "score_results: multiple policies present "
+                f"({sorted(policy_names)!r}) but no baseline_policy_name was specified. "
+                "Set 'baseline_policy_name' in the study config."
+            )
+    elif baseline_policy_name not in policy_names:
+        raise ValueError(
+            f"score_results: baseline_policy_name={baseline_policy_name!r} "
+            f"not found in result rows (present policies: {sorted(policy_names)!r})."
+        )
+
     baseline_by_prompt: dict[str, dict] = {}
     for row in rows:
+        if row.get("policy_name") != baseline_policy_name:
+            continue
         pid = row["prompt_id"]
         if pid not in baseline_by_prompt:
             baseline_by_prompt[pid] = row
+
+    missing = sorted({row["prompt_id"] for row in rows} - baseline_by_prompt.keys())
+    if missing:
+        raise ValueError(
+            f"score_results: no baseline row for prompt_id(s) {missing!r} "
+            f"under baseline policy {baseline_policy_name!r}."
+        )
 
     for row in rows:
         pid = row["prompt_id"]
@@ -586,7 +623,7 @@ def run_workflow_study(
         raise RuntimeError("No enabled policies were run. Enable at least one policy config.")
 
     # --- Post-processing ---
-    score_results(rows, ctx.thresholds_cfg)
+    score_results(rows, ctx.thresholds_cfg, baseline_policy_name=ctx.baseline_policy_name)
 
     # --- Write final outputs (overwrites incremental JSONL with scored version) ---
     summary = write_results(
