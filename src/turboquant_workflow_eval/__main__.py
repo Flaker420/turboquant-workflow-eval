@@ -16,8 +16,12 @@ def main(argv: list[str] | None = None) -> None:
     # --- Core arguments (backward-compatible) ---
     parser.add_argument(
         "--study-config",
-        required=True,
-        help="Path to the study configuration YAML (e.g. configs/studies/default.yaml)",
+        default=None,
+        help=(
+            "Path to the study configuration YAML "
+            "(e.g. configs/studies/default.yaml). Required for normal/dry-run "
+            "modes; optional for --rescore (used as a thresholds source)."
+        ),
     )
     parser.add_argument(
         "--output-dir",
@@ -107,6 +111,8 @@ def main(argv: list[str] | None = None) -> None:
 
     # --- Dry-run mode ---
     if args.dry_run:
+        if not args.study_config:
+            parser.error("--study-config is required for --dry-run")
         from .validation import dry_run
 
         exit_code = dry_run(
@@ -122,19 +128,18 @@ def main(argv: list[str] | None = None) -> None:
 
     # --- Re-score mode ---
     if args.rescore:
-        from .config import apply_dot_overrides
         from .rescoring import rescore
 
-        # Build thresholds from --set overrides
-        thresholds = {}
-        if args.overrides:
-            thresholds = apply_dot_overrides(thresholds, args.overrides)
         rescore(
             rows_jsonl_path=args.rescore,
-            thresholds=thresholds or None,
+            study_config=args.study_config,
+            overrides=args.overrides or None,
             output_dir=args.output_dir if args.output_dir != "outputs" else None,
         )
         return
+
+    if not args.study_config:
+        parser.error("--study-config is required unless --rescore is given")
 
     # --- Normal run ---
     from .study import run_workflow_study

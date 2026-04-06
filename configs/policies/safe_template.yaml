@@ -5,7 +5,6 @@ adapter:
   import_path: turboquant_workflow_eval.adapters.turboquant:TurboQuantAdapter
 settings:
   bit_width: 4
-  scope: full_attention_only
   profile: safe
 notes:
   - Conservative compression profile for first workflow comparison.
