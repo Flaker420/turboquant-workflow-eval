@@ -25,6 +25,7 @@ These methods enable the study runner to reuse a single model across multiple po
 - `revert(model) -> bool` -- undo the changes made by `prepare_model()`. Return `True` if the model is clean and reusable, `False` if a full reload is needed. Default: no-op, returns `True`
 - `get_state() -> dict` -- return current compression parameters for inspection (used by the Quick Test UI tab). Default: empty dict
 - `update_params(params) -> bool` -- hot-update compression params without full revert + reapply. Return `True` if applied, `False` if not supported. Default: returns `False`
+- `reset_generation_state() -> None` -- clear per-generation state (e.g. KV cache, internal buffers) before each generation attempt. Called by the study runner before every `generate_one`, including each repetition, so each attempt starts from a clean state. Default: no-op. Override this if your adapter accumulates state across generations.
 
 When `can_revert()` returns `True`, the study runner loads the model once and calls `prepare_model()` / `revert()` for each policy. When it returns `False`, the model is reloaded from scratch before each policy.
 

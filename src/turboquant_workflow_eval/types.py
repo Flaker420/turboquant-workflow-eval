@@ -47,6 +47,7 @@ class StudyContext:
     thresholds_cfg: dict[str, Any]
     output_dir: Path
     repetitions: int = 1
+    baseline_policy_name: str | None = None
 
 
 @dataclass(frozen=True)

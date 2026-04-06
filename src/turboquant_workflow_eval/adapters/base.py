@@ -65,3 +65,14 @@ class CompressionAdapter:
         re-prepare instead).
         """
         return False
+
+    # --- New: generation state reset ---
+
+    def reset_generation_state(self) -> None:
+        """Clear per-generation state (e.g. KV cache) before a new generation.
+
+        Called by the study runner before every ``generate_one`` invocation,
+        including each repetition, so each attempt starts from a clean state
+        regardless of warmup or prior prompt history. The base implementation
+        is a no-op; adapters that maintain generation state should override.
+        """
