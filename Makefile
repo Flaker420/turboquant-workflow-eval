@@ -3,7 +3,7 @@ export PYTHONPATH
 
 MODEL_CONFIG ?= configs/model/qwen35_9b_text_only.yaml
 EXPERIMENT_CONFIG ?= configs/experiments/preflight_stats.yaml
-STUDY_CONFIG ?= configs/studies/default.yaml
+STUDY_CONFIG ?= configs/studies/default_qwen35_9b.yaml
 POLICY_CONFIGS ?= configs/policies/baseline.yaml
 OUTPUT_DIR ?= outputs/study_run
 DOWNLOAD_OUTPUT ?= outputs/download_summary.json

@@ -19,7 +19,7 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         help=(
             "Path to the study configuration YAML "
-            "(e.g. configs/studies/default.yaml). Required for normal/dry-run "
+            "(e.g. configs/studies/default_qwen35_9b.yaml). Required for normal/dry-run "
             "modes; optional for --rescore (used as a thresholds source)."
         ),
     )

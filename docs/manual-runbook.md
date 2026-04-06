@@ -96,7 +96,7 @@ pytest -q
 Before committing GPU hours, verify all configs, file paths, and adapter imports resolve correctly:
 
 ```bash
-python -m turboquant_workflow_eval --study-config configs/studies/default.yaml --dry-run
+python -m turboquant_workflow_eval --study-config configs/studies/default_qwen35_9b.yaml --dry-run
 ```
 
 This runs in <1 second and prints an execution plan:
@@ -144,7 +144,7 @@ Before running the full matrix, verify that a single prompt works end-to-end:
 
 ```bash
 python scripts/run_workflow_study.py \
-  --study-config configs/studies/default.yaml \
+  --study-config configs/studies/default_qwen35_9b.yaml \
   --single --prompt-id math_01
 ```
 
@@ -154,7 +154,7 @@ Baseline only:
 
 ```bash
 python scripts/run_workflow_study.py \
-  --study-config configs/studies/default.yaml \
+  --study-config configs/studies/default_qwen35_9b.yaml \
   --policy-configs configs/policies/baseline.yaml \
   --output-dir outputs/study_baseline
 ```
@@ -163,7 +163,7 @@ Baseline + safe policy:
 
 ```bash
 python scripts/run_workflow_study.py \
-  --study-config configs/studies/default.yaml \
+  --study-config configs/studies/default_qwen35_9b.yaml \
   --policy-configs configs/policies/baseline.yaml,configs/policies/safe_template.yaml \
   --output-dir outputs/study_compare
 ```
@@ -174,7 +174,7 @@ Override runtime parameters directly from the command line:
 
 ```bash
 python scripts/run_workflow_study.py \
-  --study-config configs/studies/default.yaml \
+  --study-config configs/studies/default_qwen35_9b.yaml \
   --set runtime.max_new_tokens=64 --repetitions 5
 ```
 
@@ -182,7 +182,7 @@ Run only coding prompts:
 
 ```bash
 python scripts/run_workflow_study.py \
-  --study-config configs/studies/default.yaml \
+  --study-config configs/studies/default_qwen35_9b.yaml \
   --prompt-category coding
 ```
 
@@ -190,7 +190,7 @@ Filter prompts by regex:
 
 ```bash
 python scripts/run_workflow_study.py \
-  --study-config configs/studies/default.yaml \
+  --study-config configs/studies/default_qwen35_9b.yaml \
   --prompt-filter "math|cagr"
 ```
 
@@ -226,7 +226,7 @@ python -m turboquant_workflow_eval \
 
 ```bash
 python -m turboquant_workflow_eval \
-  --study-config configs/studies/default.yaml \
+  --study-config configs/studies/default_qwen35_9b.yaml \
   --rescore outputs/study_compare/rows.jsonl \
   --set thresholds.latency_red_pct=50
 ```
