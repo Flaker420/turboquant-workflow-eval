@@ -166,7 +166,7 @@ def _values_match(actual_repr: str, expected_literal: str) -> bool:
                 for a, b in zip(actual_val, expected_val)
             ):
                 return True
-    except Exception:
+    except (ValueError, SyntaxError, TypeError):
         pass
 
     return False
