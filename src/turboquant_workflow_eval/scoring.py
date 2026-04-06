@@ -124,11 +124,38 @@ _DEFAULT_THRESHOLDS: dict[str, float] = {
 }
 
 
-def _resolve_thresholds(thresholds: dict[str, Any] | None, category: str | None = None) -> dict[str, float]:
+def _thresholds_to_dict(thresholds: Any) -> dict[str, Any]:
+    """Coerce a ``ThresholdsConfig`` (or already-flat dict) to a flat dict.
+
+    None-valued fields are dropped so they fall back to ``_DEFAULT_THRESHOLDS``.
+    The ``per_category`` mapping is unfolded into top-level keys keyed by
+    category name (matching the legacy nested format that ``_resolve_thresholds``
+    already understands).
+    """
+    if thresholds is None:
+        return {}
+    if isinstance(thresholds, dict):
+        return thresholds
+    # Treat as ThresholdsConfig dataclass.
+    out: dict[str, Any] = {}
+    for f in ("latency_yellow_pct", "latency_red_pct", "similarity_yellow",
+              "similarity_red", "output_length_yellow_pct", "output_length_red_pct"):
+        v = getattr(thresholds, f, None)
+        if v is not None:
+            out[f] = v
+    per_category = getattr(thresholds, "per_category", None) or {}
+    if per_category:
+        out["default"] = dict(out)  # snapshot of the flat fields
+        for cat, sub in per_category.items():
+            out[cat] = _thresholds_to_dict(sub)
+    return out
+
+
+def _resolve_thresholds(thresholds: Any, category: str | None = None) -> dict[str, float]:
     """Resolve thresholds with per-category override support.
 
-    Accepts either a flat dict (legacy) or a nested dict with ``"default"``
-    and category-specific keys::
+    Accepts a ``ThresholdsConfig``, a flat dict, or a nested dict with
+    ``"default"`` and category-specific keys::
 
         thresholds:
           default:
@@ -138,6 +165,7 @@ def _resolve_thresholds(thresholds: dict[str, Any] | None, category: str | None 
 
     Falls back to ``_DEFAULT_THRESHOLDS`` for any missing key.
     """
+    thresholds = _thresholds_to_dict(thresholds)
     if not thresholds:
         return dict(_DEFAULT_THRESHOLDS)
 
@@ -156,7 +184,7 @@ def _resolve_thresholds(thresholds: dict[str, Any] | None, category: str | None 
 def compute_verdict(
     row: dict[str, Any],
     baseline_row: dict[str, Any] | None,
-    thresholds: dict[str, Any] | None = None,
+    thresholds: Any = None,
 ) -> str:
     """Return ``'green'``, ``'yellow'``, or ``'red'`` for a single result row.
 

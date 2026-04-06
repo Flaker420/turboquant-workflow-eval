@@ -10,22 +10,43 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from turboquant_workflow_eval.config import load_yaml, resolve_relative_path
+import importlib.util
+import hashlib
+
+from turboquant_workflow_eval.loader import load_model_module
 from turboquant_workflow_eval.model_loader import load_model_and_tokenizer, resolve_language_model_root
 from turboquant_workflow_eval.module_discovery import discover_attention_blocks
 from turboquant_workflow_eval.preflight import run_preflight
 from turboquant_workflow_eval.prompts import load_prompt_source
+from turboquant_workflow_eval.schema import model_to_legacy_dict
+
+
+def _load_experiment_module(path: str | Path) -> dict:
+    file_path = Path(path).resolve()
+    if not file_path.exists():
+        raise FileNotFoundError(f"Experiment config not found: {file_path}")
+    digest = hashlib.sha1(str(file_path).encode()).hexdigest()[:12]
+    spec = importlib.util.spec_from_file_location(
+        f"turboquant_eval_experiment_{file_path.stem}_{digest}", file_path
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    if not hasattr(module, "EXPERIMENT"):
+        raise RuntimeError(
+            f"Experiment config {file_path} must define a top-level EXPERIMENT dict"
+        )
+    return module.EXPERIMENT
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run a preflight Q/K/V stats pass.")
-    parser.add_argument("--experiment-config", default="configs/experiments/preflight_stats.yaml")
+    parser.add_argument("--experiment-config", default="configs/experiments/preflight_stats.py")
     parser.add_argument("--output-dir", default="outputs/preflight")
     parser.add_argument("--prompts-file", default=None)
     args = parser.parse_args()
 
-    exp_cfg = load_yaml(args.experiment_config)
-    model_cfg = load_yaml(resolve_relative_path(args.experiment_config, exp_cfg["model_config"]))
+    exp_cfg = _load_experiment_module(args.experiment_config)
+    model_cfg = model_to_legacy_dict(load_model_module(exp_cfg["model_config_path"]))
 
     prompts = load_prompt_source(
         source=exp_cfg["prompts"]["source"],

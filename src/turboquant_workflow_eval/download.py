@@ -5,15 +5,22 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .config import load_yaml
+from .loader import load_model_module
+from .schema import model_to_legacy_dict
 
 
 def discover_model_configs(config_dir: str | Path = "configs/model") -> list[dict]:
-    """Discover all model config YAMLs in the given directory."""
+    """Discover all model config Python modules in the given directory.
+
+    Returns legacy-shaped dicts (with ``_config_path`` injected) so existing
+    callers in this module continue to work unchanged.
+    """
     config_dir = Path(config_dir)
     results = []
-    for path in sorted(config_dir.glob("*.yaml")):
-        cfg = load_yaml(path)
+    for path in sorted(config_dir.glob("*.py")):
+        if path.name.startswith("_"):
+            continue
+        cfg = model_to_legacy_dict(load_model_module(path))
         cfg["_config_path"] = str(path)
         results.append(cfg)
     return results

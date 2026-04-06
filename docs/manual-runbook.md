@@ -54,19 +54,19 @@ python scripts/download_model.py --all
 Download a single model (Qwen3.5-9B, default):
 
 ```bash
-python scripts/download_model.py --model-config configs/model/qwen35_9b_text_only.yaml
+python scripts/download_model.py --model configs/model/qwen35_9b_text_only.py
 ```
 
 Download a single model (Qwen3-8B):
 
 ```bash
-python scripts/download_model.py --model-config configs/model/qwen3_8b.yaml
+python scripts/download_model.py --model configs/model/qwen3_8b.py
 ```
 
 Tokenizer only:
 
 ```bash
-python scripts/download_model.py --model-config configs/model/qwen35_9b_text_only.yaml --tokenizer-only
+python scripts/download_model.py --model configs/model/qwen35_9b_text_only.py --tokenizer-only
 ```
 
 Check what is already cached:
@@ -77,7 +77,7 @@ python scripts/download_model.py --check-only
 
 Parameters:
 - `--all` -- download all models in `configs/model/`
-- `--model-config PATH` -- single model config
+- `--model PATH` -- single model config
 - `--check-only` -- show cache status without downloading
 - `--tokenizer-only` -- skip full model weights
 - `--skip-cached` / `--no-skip-cached` -- skip or force re-download of cached models
@@ -96,7 +96,7 @@ pytest -q
 Before committing GPU hours, verify all configs, file paths, and adapter imports resolve correctly:
 
 ```bash
-python -m turboquant_workflow_eval --study-config configs/studies/default_qwen35_9b.yaml --dry-run
+python -m turboquant_workflow_eval --study configs/studies/default_qwen35_9b.py --dry-run
 ```
 
 This runs in <1 second and prints an execution plan:
@@ -116,18 +116,18 @@ You can combine `--dry-run` with prompt filtering and `--set` overrides to valid
 ## 7. List discovered attention blocks
 
 ```bash
-python scripts/list_attention_blocks.py --model-config configs/model/qwen35_9b_text_only.yaml
+python scripts/list_attention_blocks.py --model configs/model/qwen35_9b_text_only.py
 ```
 
 Optional parameters:
-- `--model-config PATH`
+- `--model PATH`
 - `--output PATH`
 
 ## 8. Run preflight instrumentation
 
 ```bash
 python scripts/run_preflight_stats.py \
-  --experiment-config configs/experiments/preflight_stats.yaml \
+  --experiment-config configs/experiments/preflight_stats.py \
   --output-dir outputs/preflight_smoke
 ```
 
@@ -144,7 +144,7 @@ Before running the full matrix, verify that a single prompt works end-to-end:
 
 ```bash
 python scripts/run_workflow_study.py \
-  --study-config configs/studies/default_qwen35_9b.yaml \
+  --study configs/studies/default_qwen35_9b.py \
   --single --prompt-id math_01
 ```
 
@@ -154,8 +154,8 @@ Baseline only:
 
 ```bash
 python scripts/run_workflow_study.py \
-  --study-config configs/studies/default_qwen35_9b.yaml \
-  --policy-configs configs/policies/baseline.yaml \
+  --study configs/studies/default_qwen35_9b.py \
+  --policies configs/policies/baseline.py \
   --output-dir outputs/study_baseline
 ```
 
@@ -163,8 +163,8 @@ Baseline + safe policy:
 
 ```bash
 python scripts/run_workflow_study.py \
-  --study-config configs/studies/default_qwen35_9b.yaml \
-  --policy-configs configs/policies/baseline.yaml,configs/policies/safe_template.yaml \
+  --study configs/studies/default_qwen35_9b.py \
+  --policies configs/policies/baseline.py,configs/policies/safe_template.py \
   --output-dir outputs/study_compare
 ```
 
@@ -174,7 +174,7 @@ Override runtime parameters directly from the command line:
 
 ```bash
 python scripts/run_workflow_study.py \
-  --study-config configs/studies/default_qwen35_9b.yaml \
+  --study configs/studies/default_qwen35_9b.py \
   --set runtime.max_new_tokens=64 --repetitions 5
 ```
 
@@ -182,7 +182,7 @@ Run only coding prompts:
 
 ```bash
 python scripts/run_workflow_study.py \
-  --study-config configs/studies/default_qwen35_9b.yaml \
+  --study configs/studies/default_qwen35_9b.py \
   --prompt-category coding
 ```
 
@@ -190,14 +190,14 @@ Filter prompts by regex:
 
 ```bash
 python scripts/run_workflow_study.py \
-  --study-config configs/studies/default_qwen35_9b.yaml \
+  --study configs/studies/default_qwen35_9b.py \
   --prompt-filter "math|cagr"
 ```
 
 ### Parameters
-- `--study-config PATH`
-- `--policy-configs PATH1,PATH2,...`
-- `--model-config PATH`
+- `--study PATH`
+- `--policies PATH1,PATH2,...`
+- `--model PATH`
 - `--output-dir PATH`
 - `--set KEY=VALUE` (repeatable, dot-notation)
 - `--repetitions N`
@@ -222,11 +222,11 @@ python -m turboquant_workflow_eval \
   --set thresholds.latency_red_pct=50
 ```
 
-`--study-config` is **optional** in `--rescore` mode. When supplied, the study YAML's `thresholds:` block is used as the base and `--set` overrides are layered on top:
+`--study` is **optional** in `--rescore` mode. When supplied, the study YAML's `thresholds:` block is used as the base and `--set` overrides are layered on top:
 
 ```bash
 python -m turboquant_workflow_eval \
-  --study-config configs/studies/default_qwen35_9b.yaml \
+  --study configs/studies/default_qwen35_9b.py \
   --rescore outputs/study_compare/rows.jsonl \
   --set thresholds.latency_red_pct=50
 ```
@@ -252,17 +252,17 @@ Generate long-context evaluation prompts using the target model:
 
 ```bash
 python scripts/generate_prompts.py \
-  --model-config configs/model/qwen35_9b_text_only.yaml \
+  --model configs/model/qwen35_9b_text_only.py \
   --output prompts/generated_long_context.yaml \
   --max-new-tokens 2048
 ```
 
 Optional parameters:
-- `--model-config PATH`
+- `--model PATH`
 - `--output PATH`
 - `--max-new-tokens N`
 
-The generated YAML follows the same schema as the fixed prompt pack. To use it in a study, pass `configs/studies/full.yaml` as the study config (which references both the fixed and generated prompt packs) or use `make study-full`.
+The generated YAML follows the same schema as the fixed prompt pack. To use it in a study, pass `configs/studies/full.py` as the study config (which references both the fixed and generated prompt packs) or use `make study-full`.
 
 ## 12. Expected outputs
 

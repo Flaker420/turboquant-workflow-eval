@@ -45,7 +45,8 @@ from ..core import (
 def patch_qwen35_with_tq(model, bit_width=4, seed=42, device=None, *,
                          num_layers=32, full_attn_interval=4,
                          kv_heads=4, head_dim=256, residual_window=0,
-                         key_strategy="mse+qjl", value_strategy="mse"):
+                         key_strategy="mse+qjl", value_strategy="mse",
+                         compressible_layers=None):
     """Patch a Qwen3.5 model to use TurboQuant compressed KV cache.
 
     Args:
@@ -57,12 +58,28 @@ def patch_qwen35_with_tq(model, bit_width=4, seed=42, device=None, *,
         full_attn_interval: GatedAttn layer interval (default 4).
         kv_heads: Number of KV heads (default 4).
         head_dim: Head dimension (default 256).
+        compressible_layers: Optional explicit set of layer indices to compress.
+            When None, defaults to every ``full_attn_interval``-th layer (the
+            standard GatedAttn pattern). When provided, must be a non-empty
+            subset of the default GatedAttn indices — DeltaNet layers cannot
+            be compressed.
 
     Returns:
         TQQuantizedCache instance. Call cache.clear() between generations.
     """
     if device is None:
         device = next(model.parameters()).device
+
+    # Validate and resolve compressible_layers via the Qwen3.5 backend's helper
+    # so the cache and the patch loop agree on the layer set.
+    from .qwen import _resolve_compressible_layers
+    default_ga = {i for i in range(num_layers)
+                  if (i + 1) % full_attn_interval == 0}
+    resolved = _resolve_compressible_layers(
+        compressible_layers, default_ga, num_layers,
+        backend_name="patch_qwen35_with_tq",
+        require_subset_of_default=True,
+    )
 
     cache = TQQuantizedCache(
         num_layers=num_layers, interval=full_attn_interval,
@@ -71,6 +88,7 @@ def patch_qwen35_with_tq(model, bit_width=4, seed=42, device=None, *,
         residual_window=residual_window,
         key_strategy=key_strategy,
         value_strategy=value_strategy,
+        compressible_layers=sorted(resolved),
     )
 
     # Find the attention layers in the model
@@ -98,7 +116,8 @@ def patch_qwen35_with_tq(model, bit_width=4, seed=42, device=None, *,
 def patch_qwen3_with_tq(model, bit_width=4, seed=42, device=None, *,
                         num_layers=36, kv_heads=8, head_dim=128,
                         residual_window=0, key_strategy="mse+qjl",
-                        value_strategy="mse"):
+                        value_strategy="mse",
+                        compressible_layers=None):
     """Patch a Qwen3-8B model to use TurboQuant compressed KV cache.
 
     All layers are dense attention and compressible.
@@ -111,12 +130,21 @@ def patch_qwen3_with_tq(model, bit_width=4, seed=42, device=None, *,
         num_layers: Number of transformer layers (default 36).
         kv_heads: Number of KV heads (default 8).
         head_dim: Head dimension (default 128).
+        compressible_layers: Optional explicit subset of layer indices in
+            ``[0, num_layers)`` to compress. When None, all layers compress.
 
     Returns:
         TQQuantizedCache instance. Call cache.clear() between generations.
     """
     if device is None:
         device = next(model.parameters()).device
+
+    from .qwen import _resolve_compressible_layers
+    resolved = _resolve_compressible_layers(
+        compressible_layers, set(range(num_layers)), num_layers,
+        backend_name="patch_qwen3_with_tq",
+        require_subset_of_default=False,
+    )
 
     cache = TQQuantizedCache(
         num_layers=num_layers, interval=1,
@@ -125,6 +153,7 @@ def patch_qwen3_with_tq(model, bit_width=4, seed=42, device=None, *,
         residual_window=residual_window,
         key_strategy=key_strategy,
         value_strategy=value_strategy,
+        compressible_layers=sorted(resolved),
     )
 
     layers = _get_model_layers(model)
@@ -147,7 +176,8 @@ def patch_qwen3_with_tq(model, bit_width=4, seed=42, device=None, *,
 def patch_qwen25_with_tq(model, bit_width=4, seed=42, device=None, *,
                          num_layers=36, kv_heads=2, head_dim=128,
                          residual_window=0, key_strategy="mse+qjl",
-                         value_strategy="mse"):
+                         value_strategy="mse",
+                         compressible_layers=None):
     """Patch a Qwen2.5 model to use TurboQuant compressed KV cache.
 
     Qwen2.5-3B-Instruct: 36 dense attention layers, 2 KV heads, head_dim 128.
@@ -164,12 +194,21 @@ def patch_qwen25_with_tq(model, bit_width=4, seed=42, device=None, *,
         head_dim: Head dimension (default 128).
         residual_window: Number of recent tokens to keep in FP16 (default 0).
         key_strategy: "mse+qjl" or "mse" (default "mse+qjl").
+        compressible_layers: Optional explicit subset of layer indices in
+            ``[0, num_layers)`` to compress. When None, all layers compress.
 
     Returns:
         TQQuantizedCache instance. Call cache.clear() between generations.
     """
     if device is None:
         device = next(model.parameters()).device
+
+    from .qwen import _resolve_compressible_layers
+    resolved = _resolve_compressible_layers(
+        compressible_layers, set(range(num_layers)), num_layers,
+        backend_name="patch_qwen25_with_tq",
+        require_subset_of_default=False,
+    )
 
     cache = TQQuantizedCache(
         num_layers=num_layers, interval=1,
@@ -178,6 +217,7 @@ def patch_qwen25_with_tq(model, bit_width=4, seed=42, device=None, *,
         residual_window=residual_window,
         key_strategy=key_strategy,
         value_strategy=value_strategy,
+        compressible_layers=sorted(resolved),
     )
 
     layers = _get_model_layers(model)

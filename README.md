@@ -81,9 +81,37 @@ Both `safe_template.yaml` (bit_width 4) and `aggressive_template.yaml` (bit_widt
 
 ## Study configuration
 
-Study YAMLs (`configs/studies/*.yaml`) collect the model config, prompt pack, policy list, runtime parameters, and thresholds. A multi-policy study **must** declare `baseline_policy_name:` -- this names the policy whose rows are used as the comparison baseline for similarity, latency delta, and verdicts. `validate_study_config` raises a `ConfigValidationError` at load time if the field is missing on a multi-policy run. All bundled studies declare `baseline_policy_name: baseline`.
+Study, model, and policy configs are **Python modules** under `configs/studies/`, `configs/model/`, and `configs/policies/`. Each module exports a single frozen `@dataclass` instance (`STUDY`, `MODEL`, or `POLICY`) defined in `src/turboquant_workflow_eval/schema.py`. The loader (`src/turboquant_workflow_eval/loader.py`) imports the file via `importlib.util` and returns the dataclass directly — there is no YAML in the configuration path.
 
-Single-policy studies do not require the field; the only present policy is used as its own baseline (this is just provenance, since there is nothing to compare against).
+Field validation lives in `__post_init__`: invalid `dtype`, missing `model_name`, out-of-range `bit_width`, malformed `import_path`, etc. all raise `ConfigValidationError` at construction time. A multi-policy `StudyConfig` **must** declare `baseline_policy_name=`; single-policy studies auto-set it to that policy's name. All bundled studies declare `baseline_policy_name="baseline"`.
+
+The CLI (`python -m turboquant_workflow_eval`) loads a study module via `--study configs/studies/default_qwen35_9b.py` and exposes every dataclass field as a typed argparse flag. See `--help` for the full list, or `## CLI quick reference` below.
+
+Authoring a new study is just writing Python:
+
+```python
+# configs/studies/my_run.py
+from pathlib import Path
+from turboquant_workflow_eval.loader import load_model_module, load_policy_module
+from turboquant_workflow_eval.schema import StudyConfig, RuntimeConfig, ThresholdsConfig
+
+_HERE = Path(__file__).resolve().parent
+
+STUDY = StudyConfig(
+    name="my_run",
+    model=load_model_module(_HERE.parent / "model" / "qwen25_3b.py"),
+    prompt_pack=(_HERE.parent.parent / "prompts" / "workflow_prompts.yaml",),
+    policies=(
+        load_policy_module(_HERE.parent / "policies" / "baseline.py"),
+        load_policy_module(_HERE.parent / "policies" / "safe_template.py"),
+    ),
+    baseline_policy_name="baseline",
+    runtime=RuntimeConfig(max_input_tokens=2048, max_new_tokens=256),
+    thresholds=ThresholdsConfig(latency_red_pct=50.0),
+)
+```
+
+> **Note:** prompt packs (`prompts/*.yaml`) remain YAML — they are content, not configuration, and live in a separate location from the dataclass-based configs. Only the configuration tree (`configs/{model,policies,studies,experiments}/`) was migrated.
 
 ## RunPod-first design
 
@@ -323,58 +351,82 @@ Generates long-context evaluation prompts using the target model. The output YAM
 
 ## CLI quick reference
 
-The `python -m turboquant_workflow_eval` entry point (and `scripts/run_workflow_study.py`) supports these flags:
+The `python -m turboquant_workflow_eval` entry point (and `scripts/run_workflow_study.py`) loads a Python study module and exposes every dataclass knob as a typed argparse flag. Run with `--help` for the authoritative list. Key flags:
+
+**Study selection / control**
 
 | Flag | Description |
 |------|-------------|
-| `--study-config PATH` | Path to study YAML. Required for normal and `--dry-run` modes; **optional in `--rescore` mode**, where it serves as a thresholds source. |
-| `--output-dir PATH` | Output directory (default: `outputs/`) |
-| `--policy-configs P1,P2` | Override policy configs from study YAML |
-| `--model-config PATH` | Override model config from study YAML |
-| `--set KEY=VALUE` | Override any **study** config value with dot-notation (repeatable). In `--rescore` mode, both `thresholds.latency_red_pct=50` and the bare `latency_red_pct=50` forms are accepted. |
-| `--set-policy NAME.KEY=VALUE` | Override a key inside a **policy** YAML at load time (repeatable). Format: `<policy_name\|*>.<dot.key>=<value>`. Examples: `--set-policy turboquant_safe.settings.key_strategy=mse`, `--set-policy '*.settings.bit_width=8'`, `--set-policy baseline.enabled=false`. |
-| `--repetitions N` | Shorthand for `--set runtime.repetitions=N` |
-| `--prompt-id ID` | Run only this prompt (repeatable for multiple IDs) |
-| `--prompt-category CAT` | Run only prompts in this category (repeatable) |
-| `--prompt-filter REGEX` | Filter prompts by regex on id/title |
-| `--single` | Quick smoke test: 1st prompt, 1st policy, 1 rep |
-| `--dry-run` | Validate all configs without GPU (runs in <1s) |
-| `--rescore ROWS_JSONL` | Re-score existing results with new thresholds (no GPU). Reads `baseline_policy_name` from a sibling `run_summary.json` if present, and writes a refreshed `run_summary.json` with `rescored: true`, `rescore_thresholds`, and `rescore_verdicts_changed`. |
+| `--study PATH` | Python study module (e.g. `configs/studies/default_qwen35_9b.py`). Required unless `--rescore`. Also accepts `package.module:STUDY` import path syntax. |
+| `--model PATH` | Replace `study.model` with a different model module. |
+| `--policies P1.py,P2.py` | Replace `study.policies` with the loaded list. |
+| `--output-dir PATH` | Output directory (default: `outputs/`). |
+| `--single` | Smoke test: first matching prompt, first enabled policy, 1 repetition. |
+| `--dry-run` | Validate configs and print execution plan without touching the GPU. |
+| `--rescore ROWS_JSONL` | Re-score existing results with new thresholds (no GPU). Reads `baseline_policy_name` from a sibling `run_summary.json`; writes a refreshed summary with `rescored: true`. |
+| `--prompt-id ID` | Run only this prompt (repeatable). |
+| `--prompt-category CAT` | Run only prompts in this category (repeatable). |
+| `--prompt-filter REGEX` | Filter prompts by regex on id/title. |
+
+**Global PolicySettings overrides** (apply to every policy)
+
+| Flag | Field |
+|------|-------|
+| `--bit-width INT` | `settings.bit_width` |
+| `--seed INT` | `settings.seed` |
+| `--residual-window INT` | `settings.residual_window` |
+| `--key-strategy {mse,mse+qjl}` | `settings.key_strategy` |
+| `--value-strategy {mse}` | `settings.value_strategy` |
+| `--compressible-layers 3,7,11,...` | `settings.compressible_layers` |
+| `--profile NAME` | `settings.profile` |
+
+**Per-policy overrides** (`NAME=VALUE`, repeatable)
+
+`--bit-width-for NAME=INT`, `--seed-for NAME=INT`, `--residual-window-for NAME=INT`, `--key-strategy-for NAME=STR`, `--value-strategy-for NAME=STR`, `--compressible-layers-for NAME=3,7,11`, `--profile-for NAME=STR`. Each one targets exactly one policy by name.
+
+**Runtime / thresholds / early stop**
+
+`--max-input-tokens`, `--max-new-tokens`, `--temperature`, `--top-p`, `--repetitions`, `--no-cache`, `--shuffle-policies`, `--shuffle-seed`, `--baseline-policy NAME`, `--latency-{yellow,red}-pct`, `--similarity-{yellow,red}`, `--output-length-{yellow,red}-pct`, `--max-red-verdicts`, `--max-error-rate`.
+
+**Escape hatches** (for paths without a dedicated flag)
+
+| Flag | Description |
+|------|-------------|
+| `--set DOT.PATH=VALUE` | Override any `StudyConfig` field via dot-path (e.g. `--set runtime.max_new_tokens=128`). Repeatable. Applied via `dataclasses.replace` recursively. |
+| `--set-policy NAME.DOT.KEY=VALUE` | Per-policy dot-path override. First segment is a policy name (or `*` for every policy). Examples: `--set-policy turboquant_safe.settings.bit_width=8`, `--set-policy '*.settings.key_strategy=mse'`. |
 
 ### Common examples
 
 ```bash
 # Validate before committing GPU hours
-python -m turboquant_workflow_eval --study-config configs/studies/default_qwen35_9b.yaml --dry-run
+python -m turboquant_workflow_eval --study configs/studies/default_qwen35_9b.py --dry-run
 
 # Quick smoke test with one math prompt
-python -m turboquant_workflow_eval --study-config configs/studies/default_qwen35_9b.yaml \
+python -m turboquant_workflow_eval --study configs/studies/default_qwen35_9b.py \
   --single --prompt-id math_01
 
 # Override max tokens and repetitions from CLI
-python -m turboquant_workflow_eval --study-config configs/studies/default_qwen35_9b.yaml \
-  --set runtime.max_new_tokens=64 --repetitions 5
+python -m turboquant_workflow_eval --study configs/studies/default_qwen35_9b.py \
+  --max-new-tokens 64 --repetitions 5
+
+# Force every policy to use plain MSE (no QJL)
+python -m turboquant_workflow_eval --study configs/studies/default_qwen35_9b.py \
+  --key-strategy mse
+
+# Compress only a subset of GatedAttn layers in the safe policy
+python -m turboquant_workflow_eval --study configs/studies/default_qwen35_9b.py \
+  --compressible-layers-for turboquant_safe=7,15,23,31
 
 # Run only coding prompts
-python -m turboquant_workflow_eval --study-config configs/studies/default_qwen35_9b.yaml \
+python -m turboquant_workflow_eval --study configs/studies/default_qwen35_9b.py \
   --prompt-category coding
 
 # Re-score existing results with looser latency threshold
-python -m turboquant_workflow_eval \
-  --rescore outputs/study_run/rows.jsonl \
-  --set thresholds.latency_red_pct=50
-
-# Force every policy to use plain MSE (no QJL) without editing YAML
-python -m turboquant_workflow_eval --study-config configs/studies/default_qwen35_9b.yaml \
-  --set-policy '*.settings.key_strategy=mse'
-
-# Tweak only the safe policy: 8-bit, MSE-only
-python -m turboquant_workflow_eval --study-config configs/studies/default_qwen35_9b.yaml \
-  --set-policy turboquant_safe.settings.bit_width=8 \
-  --set-policy turboquant_safe.settings.key_strategy=mse
+python -m turboquant_workflow_eval --rescore outputs/study_run/rows.jsonl \
+  --latency-red-pct 50
 ```
 
-The Gradio UI's **Study Runner** tab has a matching **Policy Overrides** accordion: paste one override per line and they are applied to every loaded policy YAML before the run.
+> **Note:** the Gradio UI is **temporarily broken** between this PR and the UI rework PR. `app.py` still imports the deleted YAML loaders; launching it will fail at import. Use the CLI in the meantime.
 
 ## Outputs
 

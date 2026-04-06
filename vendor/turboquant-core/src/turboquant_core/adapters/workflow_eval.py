@@ -74,6 +74,9 @@ class TurboQuantAdapter:
         residual_window = settings.get("residual_window", 0)
         key_strategy = settings.get("key_strategy", "mse+qjl")
         value_strategy = settings.get("value_strategy", "mse")
+        compressible_layers = settings.get("compressible_layers")
+        if compressible_layers is not None:
+            compressible_layers = list(compressible_layers)
 
         self._bit_width = bit_width
         self._seed = seed
@@ -90,6 +93,7 @@ class TurboQuantAdapter:
             residual_window=residual_window,
             key_strategy=key_strategy,
             value_strategy=value_strategy,
+            compressible_layers=compressible_layers,
             **layout,
         )
 
@@ -107,6 +111,9 @@ class TurboQuantAdapter:
 
     def describe(self, policy_cfg: dict) -> dict:
         settings = policy_cfg.get("settings", {})
+        compressible_layers = settings.get("compressible_layers")
+        if compressible_layers is not None:
+            compressible_layers = sorted(int(i) for i in compressible_layers)
         return {
             "adapter": self.name,
             "bit_width": settings.get("bit_width", 4),
@@ -114,6 +121,7 @@ class TurboQuantAdapter:
             "residual_window": settings.get("residual_window", 0),
             "key_strategy": settings.get("key_strategy", "mse+qjl"),
             "value_strategy": settings.get("value_strategy", "mse"),
+            "compressible_layers": compressible_layers,
         }
 
     def can_revert(self) -> bool:

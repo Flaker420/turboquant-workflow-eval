@@ -7,6 +7,7 @@ import pytest
 from turboquant_core.backends.qwen_hook import (
     patch_qwen35_with_tq,
     patch_qwen3_with_tq,
+    patch_qwen25_with_tq,
     unpatch_model,
     _get_model_layers,
     _get_attention_module,
@@ -176,6 +177,49 @@ class TestPatchQwen35:
         with pytest.raises(ValueError, match="Could not find transformer layers"):
             patch_qwen35_with_tq(model)
 
+    def test_compressible_layers_subset(self):
+        """Custom GA-subset mask compresses only the specified layers."""
+        model = _make_qwen35_mock()
+        cache = patch_qwen35_with_tq(
+            model, bit_width=4, compressible_layers=[7, 15, 23, 31],
+        )
+        for i in range(32):
+            expected = i in {7, 15, 23, 31}
+            assert cache.is_compressible(i) == expected, f"Layer {i}"
+        # Verify only the masked layers were patched.
+        for i, layer in enumerate(model.model.layers):
+            forward = layer.self_attn.forward
+            if i in {7, 15, 23, 31}:
+                assert hasattr(forward, "__wrapped__"), f"Layer {i} should be patched"
+            else:
+                assert not hasattr(forward, "__wrapped__"), f"Layer {i} should not be patched"
+
+    def test_compressible_layers_singleton(self):
+        model = _make_qwen35_mock()
+        cache = patch_qwen35_with_tq(
+            model, bit_width=4, compressible_layers=[3],
+        )
+        assert cache.is_compressible(3)
+        for i in range(32):
+            if i != 3:
+                assert not cache.is_compressible(i)
+
+    def test_compressible_layers_rejects_deltanet(self):
+        """Qwen3.5 must refuse non-GA indices because DeltaNet has no KV cache."""
+        model = _make_qwen35_mock()
+        with pytest.raises(ValueError, match="DeltaNet"):
+            patch_qwen35_with_tq(model, bit_width=4, compressible_layers=[0])
+
+    def test_compressible_layers_rejects_out_of_range(self):
+        model = _make_qwen35_mock()
+        with pytest.raises(ValueError, match="out of range"):
+            patch_qwen35_with_tq(model, bit_width=4, compressible_layers=[42])
+
+    def test_compressible_layers_rejects_empty(self):
+        model = _make_qwen35_mock()
+        with pytest.raises(ValueError, match="non-empty"):
+            patch_qwen35_with_tq(model, bit_width=4, compressible_layers=[])
+
 
 # ---------------------------------------------------------------------------
 # Tests: patch_qwen3_with_tq
@@ -213,6 +257,26 @@ class TestPatchQwen3:
         cache = patch_qwen3_with_tq(model, bit_width=4)
         assert cache.kv_head_dim == 128
         assert cache.num_kv_heads == 8
+
+    def test_compressible_layers_subset(self):
+        """Dense backend accepts arbitrary index sets and patches only those."""
+        model = _make_qwen3_mock()
+        cache = patch_qwen3_with_tq(
+            model, bit_width=4, compressible_layers=[5, 10, 15],
+        )
+        for i in range(36):
+            expected = i in {5, 10, 15}
+            assert cache.is_compressible(i) == expected, f"Layer {i}"
+
+    def test_compressible_layers_rejects_out_of_range(self):
+        model = _make_qwen3_mock()
+        with pytest.raises(ValueError, match="out of range"):
+            patch_qwen3_with_tq(model, bit_width=4, compressible_layers=[42])
+
+    def test_compressible_layers_rejects_empty(self):
+        model = _make_qwen3_mock()
+        with pytest.raises(ValueError, match="non-empty"):
+            patch_qwen3_with_tq(model, bit_width=4, compressible_layers=[])
 
 
 # ---------------------------------------------------------------------------

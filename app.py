@@ -1,4 +1,19 @@
-"""Gradio UI for TurboQuant Workflow Eval."""
+"""Gradio UI for TurboQuant Workflow Eval.
+
+DEPRECATED — DO NOT LAUNCH FROM THIS COMMIT.
+
+This module loads the legacy ``configs/**/*.yaml`` files and the
+``turboquant_workflow_eval.config`` helpers, both of which were removed
+in the dataclass migration. The Gradio UI rework lands in the next PR
+and will replace every YAML touchpoint with the new ``schema.py`` /
+``loader.py`` surface (and add a UI for the new ``compressible_layers``
+knob). Until that lands, importing this module will fail at the
+top-level ``from turboquant_workflow_eval.config import …`` lines and
+the Gradio app will not launch.
+
+This is an intentional, scoped breakage approved by the maintainer to
+keep the dataclass-migration PR focused. See PR #34 follow-up.
+"""
 
 from __future__ import annotations
 

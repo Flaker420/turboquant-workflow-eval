@@ -30,7 +30,8 @@ import yaml
 # Ensure the package is importable when running from repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from turboquant_workflow_eval.config import load_yaml
+from turboquant_workflow_eval.loader import load_model_module
+from turboquant_workflow_eval.schema import model_to_legacy_dict
 from turboquant_workflow_eval.generation import render_prompt
 from turboquant_workflow_eval.model_loader import load_model_and_tokenizer, infer_model_device
 
@@ -211,7 +212,7 @@ def _extract_json_with_turns(text: str) -> dict | None:
 
 def generate_prompts(model_config_path: str, output_path: str, max_new_tokens: int = 2048) -> list[dict]:
     """Generate long-context evaluation prompts using the model."""
-    model_cfg = load_yaml(model_config_path)
+    model_cfg = model_to_legacy_dict(load_model_module(model_config_path))
     model, tokenizer, _ = load_model_and_tokenizer(model_cfg)
     device = infer_model_device(model)
     model.eval()

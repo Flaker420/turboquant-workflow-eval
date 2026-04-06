@@ -374,9 +374,41 @@ class TQQuantizedCache:
                  kv_head_dim=256, num_kv_heads=4,
                  bit_width=4, seed=42, device=torch.device("cpu"),
                  residual_window=0, key_strategy="mse+qjl",
-                 value_strategy="mse"):
+                 value_strategy="mse",
+                 compressible_layers=None):
         self.num_layers = num_layers
-        self.ga_indices = {i for i in range(num_layers) if (i + 1) % interval == 0}
+        default_ga = {i for i in range(num_layers) if (i + 1) % interval == 0}
+        if compressible_layers is None:
+            self.ga_indices = default_ga
+        else:
+            # Validate and accept any non-empty subset of [0, num_layers).
+            # Backend-level subset-of-default constraints (e.g. Qwen3.5
+            # DeltaNet exclusion) are enforced at the backend layer; the
+            # cache itself is permissive so dense backends can pass any
+            # index list through.
+            indices = set()
+            bad: list[int] = []
+            for idx in compressible_layers:
+                if isinstance(idx, bool) or not isinstance(idx, int):
+                    raise ValueError(
+                        f"TQQuantizedCache.compressible_layers must contain ints; "
+                        f"got {idx!r}"
+                    )
+                if idx < 0 or idx >= num_layers:
+                    bad.append(idx)
+                    continue
+                indices.add(idx)
+            if bad:
+                raise ValueError(
+                    f"TQQuantizedCache.compressible_layers indices {sorted(set(bad))} "
+                    f"are out of range [0, {num_layers})."
+                )
+            if not indices:
+                raise ValueError(
+                    "TQQuantizedCache.compressible_layers must be non-empty when provided."
+                )
+            self.ga_indices = indices
+        self.compressible_layers = sorted(self.ga_indices)
         self.kv_head_dim = kv_head_dim
         self.num_kv_heads = num_kv_heads
         self.device = device

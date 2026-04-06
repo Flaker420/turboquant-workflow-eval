@@ -2,9 +2,22 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
-from .config import load_yaml
+import yaml
+
 from .types import PromptSpec
+
+
+def _load_yaml(path: str | Path) -> Any:
+    """Inline YAML loader.
+
+    Prompt-pack files (``prompts/*.yaml``) are still YAML by design — they
+    are content, not configuration, and live in a separate location from
+    the dataclass-based study/model/policy configs.
+    """
+    with Path(path).open("r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
 
 
 BUILTIN_PROMPTS = [
@@ -66,7 +79,7 @@ def load_prompt_pack(path: str | Path) -> list[PromptSpec]:
         if "generated" in path.name:
             hint = " Run 'make generate-prompts' to create it first."
         raise FileNotFoundError(f"Prompt pack not found: {path}.{hint}")
-    data = load_yaml(path)
+    data = _load_yaml(path)
     raw_prompts = data.get("prompts", [])
     prompts: list[PromptSpec] = []
     for item in raw_prompts:

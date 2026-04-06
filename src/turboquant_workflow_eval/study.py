@@ -9,16 +9,9 @@ from typing import Any
 import torch
 
 from .code_runner import extract_python_code, run_code_with_tests
-from .config import (
-    apply_dot_overrides,
-    apply_policy_overrides as _apply_policy_overrides,
-    load_yaml,
-    load_yaml_with_overrides,
-    resolve_relative_path,
-    validate_config,
-)
 from .generation import generate_one
 from .import_utils import load_object
+from .loader import load_model_module, load_policy_module, load_study_module
 from .model_loader import load_model_and_tokenizer
 from .prompts import filter_prompts, load_prompt_pack
 from .reporting import (
@@ -28,6 +21,15 @@ from .reporting import (
     write_jsonl,
     write_run_summary,
     write_text_outputs,
+)
+from .schema import (
+    EarlyStopConfig,
+    PolicyConfig,
+    StudyConfig,
+    ThresholdsConfig,
+    model_to_legacy_dict,
+    policy_to_legacy_dict,
+    replace_path,
 )
 from .scoring import check_reference_answer, compute_semantic_similarity, compute_verdict
 from .types import StudyContext
@@ -41,12 +43,16 @@ from .events import EventBus, StudyEvent
 class StudyController:
     """Controls study execution flow — pause, resume, skip, stop, early-stop."""
 
-    def __init__(self, event_bus: EventBus | None = None, early_stop_cfg: dict | None = None) -> None:
+    def __init__(
+        self,
+        event_bus: EventBus | None = None,
+        early_stop_cfg: EarlyStopConfig | None = None,
+    ) -> None:
         self.paused = False
         self.skip_current_policy = False
         self.stop_requested = False
         self._event_bus = event_bus
-        self._early_stop = early_stop_cfg or {}
+        self._early_stop = early_stop_cfg or EarlyStopConfig()
         self._red_count = 0
         self._error_count = 0
         self._prompt_count = 0
@@ -74,13 +80,13 @@ class StudyController:
         if row.get("verdict") == "red":
             self._red_count += 1
 
-        max_red = self._early_stop.get("max_red_verdicts")
+        max_red = self._early_stop.max_red_verdicts
         if max_red is not None and self._red_count >= max_red:
             if self._event_bus:
                 self._event_bus.emit_new("early_stop", reason=f"Hit {self._red_count} red verdicts (max: {max_red})")
             return True
 
-        max_error_rate = self._early_stop.get("max_error_rate")
+        max_error_rate = self._early_stop.max_error_rate
         if max_error_rate is not None and self._prompt_count > 0:
             if self._error_count / self._prompt_count > max_error_rate:
                 if self._event_bus:
@@ -104,14 +110,6 @@ class StudyController:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _load_policy_configs(study_config_path: Path, study_cfg: dict, policy_configs_arg: str | None) -> list[Path]:
-    if policy_configs_arg:
-        return [Path(item.strip()) for item in policy_configs_arg.split(",") if item.strip()]
-    return [resolve_relative_path(study_config_path, item) for item in study_cfg.get("policy_configs", [])]
-
-
-# _apply_policy_overrides lives in .config so tests can import it without torch.
-
 
 def _aggregate_stats(values: list[float]) -> dict[str, float]:
     """Compute mean and std for a list of values."""
@@ -130,98 +128,70 @@ def _aggregate_stats(values: list[float]) -> dict[str, float]:
 # ---------------------------------------------------------------------------
 
 def prepare_study(
-    study_config_path: str | Path,
+    study: StudyConfig | str | Path,
     output_dir: str | Path,
-    policy_configs_arg: str | None = None,
-    runtime_overrides: dict | None = None,
-    model_config_override: str | Path | None = None,
-    config_overrides: list[str] | None = None,
-    policy_overrides: list[str] | None = None,
+    *,
     prompt_ids: list[str] | None = None,
     prompt_categories: list[str] | None = None,
     prompt_pattern: str | None = None,
     single_mode: bool = False,
 ) -> StudyContext:
-    """Load and validate all configs, resolve paths, filter prompts.
+    """Resolve a :class:`StudyConfig` into a runnable :class:`StudyContext`.
 
-    Returns a :class:`StudyContext` ready for execution — no GPU touched.
+    Loads the prompt pack(s), applies prompt filters, optionally trims to the
+    first enabled policy for ``single_mode``, optionally shuffles the policy
+    order, and returns a context object. No GPU is touched.
+
+    Accepts either an already-constructed ``StudyConfig`` (the modern path,
+    used by the CLI) or a path to a Python config module (convenience for
+    test code and other callers that want one-shot loading).
     """
-    study_config_path = Path(study_config_path)
-    study_cfg = load_yaml_with_overrides(study_config_path, overrides=config_overrides)
-    validate_config(study_cfg, "study", study_config_path)
-
-    if model_config_override:
-        model_cfg_path = Path(model_config_override)
-    else:
-        model_cfg_path = resolve_relative_path(study_config_path, study_cfg["model_config"])
-    model_cfg = load_yaml(model_cfg_path)
-    validate_config(model_cfg, "model", model_cfg_path)
+    if isinstance(study, (str, Path)):
+        study = load_study_module(study)
 
     # Load prompts
-    prompt_pack_cfg = study_cfg["prompt_pack"]
-    if isinstance(prompt_pack_cfg, list):
-        prompt_pack = []
-        for pp in prompt_pack_cfg:
-            prompt_pack.extend(load_prompt_pack(resolve_relative_path(study_config_path, pp)))
-    else:
-        prompt_pack = load_prompt_pack(resolve_relative_path(study_config_path, prompt_pack_cfg))
+    prompt_pack: list = []
+    for pp in study.prompt_pack:
+        prompt_pack.extend(load_prompt_pack(pp))
 
     # Filter prompts
     has_filter = prompt_ids is not None or prompt_categories is not None or prompt_pattern is not None
     if has_filter or single_mode:
-        prompt_pack = filter_prompts(prompt_pack, prompt_ids=prompt_ids, categories=prompt_categories, pattern=prompt_pattern)
+        prompt_pack = filter_prompts(
+            prompt_pack,
+            prompt_ids=prompt_ids,
+            categories=prompt_categories,
+            pattern=prompt_pattern,
+        )
     if single_mode and prompt_pack:
         prompt_pack = prompt_pack[:1]
     if not prompt_pack:
         raise RuntimeError("No prompts matched the specified filters.")
 
-    # Resolve policies
-    policy_paths = _load_policy_configs(study_config_path, study_cfg, policy_configs_arg)
-    # single_mode trims to the first prompt (above) and then to the first
-    # `enabled: true` policy among policy_paths. If none are enabled, the
-    # filtered policy_paths list is left unchanged so downstream run_study
-    # will raise the existing "No enabled policies were run" error.
+    # Optionally shuffle policy order (in-place on the StudyConfig.policies tuple).
+    if study.runtime.shuffle_policies:
+        rng = random.Random(study.runtime.shuffle_seed)
+        ordered = list(study.policies)
+        rng.shuffle(ordered)
+        study = replace_path(study, "policies", tuple(ordered))
+
+    # In single-mode, trim policies to the first enabled one. This mirrors
+    # the legacy behaviour where ``--single`` runs exactly one policy on
+    # exactly one prompt.
     if single_mode:
-        first_enabled = []
-        for pp in policy_paths:
-            try:
-                pcfg = load_yaml(pp)
-                if bool(pcfg.get("enabled", False)):
-                    first_enabled.append(pp)
-                    break
-            except Exception as exc:  # noqa: BLE001
-                print(f"  [WARNING] failed to load policy {pp}: {exc}")
-                continue
-        if first_enabled:
-            policy_paths = first_enabled
-
-    runtime_cfg = study_cfg["runtime"]
-    if runtime_overrides:
-        runtime_cfg = {**runtime_cfg, **runtime_overrides}
-    thresholds_cfg = study_cfg.get("thresholds", {})
-    output_dir = Path(output_dir)
-
-    repetitions = int(runtime_cfg.get("repetitions", 1))
-
-    # Optionally shuffle policy order
-    if bool(runtime_cfg.get("shuffle_policies", False)):
-        seed = int(runtime_cfg.get("shuffle_seed", 42))
-        rng = random.Random(seed)
-        policy_paths = list(policy_paths)
-        rng.shuffle(policy_paths)
+        for p in study.policies:
+            if p.enabled:
+                study = replace_path(study, "policies", (p,))
+                # Single-policy studies must declare themselves as their own
+                # baseline so score_results doesn't trip on the multi-policy
+                # baseline guard.
+                study = replace_path(study, "baseline_policy_name", p.name)
+                break
 
     return StudyContext(
-        study_cfg=study_cfg,
-        model_cfg=model_cfg,
-        model_cfg_path=model_cfg_path,
+        study=study,
         prompt_pack=prompt_pack,
-        policy_paths=policy_paths,
-        runtime_cfg=runtime_cfg,
-        thresholds_cfg=thresholds_cfg,
-        output_dir=output_dir,
-        repetitions=repetitions,
-        baseline_policy_name=study_cfg.get("baseline_policy_name"),
-        policy_overrides=list(policy_overrides or []),
+        output_dir=Path(output_dir),
     )
 
 
@@ -229,16 +199,24 @@ def prepare_study(
 # Phase 2: Run a single prompt
 # ---------------------------------------------------------------------------
 
+def _runtime_to_dict(runtime) -> dict[str, Any]:
+    """Convert RuntimeConfig to a plain dict for ``generate_one``."""
+    from dataclasses import asdict
+    return asdict(runtime)
+
+
 def _run_single_prompt(
     model: Any,
     tokenizer: Any,
     prompt: Any,
-    policy_cfg: dict,
+    policy: PolicyConfig,
     adapter: Any,
-    runtime_cfg: dict,
+    runtime,
     repetitions: int,
 ) -> dict[str, Any]:
     """Run a single prompt through the model and collect metrics."""
+    runtime_cfg = _runtime_to_dict(runtime)
+
     adapter.reset_generation_state()
     first_result = generate_one(model, tokenizer, prompt.prompt, runtime_cfg, turns=prompt.turns)
 
@@ -259,18 +237,18 @@ def _run_single_prompt(
     tps_stats = _aggregate_stats(tps_values)
     vram_stats = _aggregate_stats(vram_values)
 
-    settings = policy_cfg.get("settings", {})
+    settings = policy.settings
     row: dict[str, Any] = {
-        "policy_name": policy_cfg["name"],
-        "comparison_label": policy_cfg.get("comparison_label", policy_cfg["name"]),
+        "policy_name": policy.name,
+        "comparison_label": policy.comparison_label,
         "adapter_name": getattr(adapter, "name", adapter.__class__.__name__),
         "prompt_id": prompt.id,
         "category": prompt.category,
         "title": prompt.title,
         "watch_for": prompt.watch_for,
         "prompt_text": prompt.prompt,
-        "residual_window": settings.get("residual_window"),
-        "key_strategy": settings.get("key_strategy"),
+        "residual_window": settings.residual_window,
+        "key_strategy": settings.key_strategy,
         **first_result,
     }
 
@@ -308,7 +286,7 @@ def _run_single_prompt(
 
 def run_policy(
     ctx: StudyContext,
-    policy_cfg: dict,
+    policy: PolicyConfig,
     model: Any,
     tokenizer: Any,
     adapter: Any,
@@ -331,13 +309,13 @@ def run_policy(
     """
     is_baseline_policy = (
         baseline_by_prompt is not None
-        and policy_cfg.get("name") == ctx.baseline_policy_name
+        and policy.name == ctx.baseline_policy_name
     )
-    thresholds_cfg = ctx.thresholds_cfg
+    thresholds = ctx.thresholds
     rows: list[dict] = []
 
     if event_bus:
-        event_bus.emit_new("policy_started", policy_name=policy_cfg["name"], policy_index=policy_index)
+        event_bus.emit_new("policy_started", policy_name=policy.name, policy_index=policy_index)
 
     for prompt_idx, prompt in enumerate(ctx.prompt_pack):
         # Check controller state
@@ -351,29 +329,29 @@ def run_policy(
         if progress_callback:
             done = policy_index * len(ctx.prompt_pack) + prompt_idx
             total = total_policies * len(ctx.prompt_pack)
-            progress_callback(done / total, f"{policy_cfg['name']}: {prompt.id}")
+            progress_callback(done / total, f"{policy.name}: {prompt.id}")
 
         if event_bus:
-            event_bus.emit_new("prompt_started", policy_name=policy_cfg["name"], prompt_id=prompt.id)
+            event_bus.emit_new("prompt_started", policy_name=policy.name, prompt_id=prompt.id)
 
         try:
             row = _run_single_prompt(
-                model, tokenizer, prompt, policy_cfg, adapter, ctx.runtime_cfg, ctx.repetitions,
+                model, tokenizer, prompt, policy, adapter, ctx.runtime, ctx.repetitions,
             )
         except Exception as exc:  # noqa: BLE001
             print(f"  [WARNING] prompt {prompt.id} failed: {exc}")
-            settings = policy_cfg.get("settings", {})
+            settings = policy.settings
             row = {
-                "policy_name": policy_cfg["name"],
-                "comparison_label": policy_cfg.get("comparison_label", policy_cfg["name"]),
+                "policy_name": policy.name,
+                "comparison_label": policy.comparison_label,
                 "adapter_name": getattr(adapter, "name", adapter.__class__.__name__),
                 "prompt_id": prompt.id,
                 "category": prompt.category,
                 "title": prompt.title,
                 "watch_for": prompt.watch_for,
                 "prompt_text": prompt.prompt,
-                "residual_window": settings.get("residual_window"),
-                "key_strategy": settings.get("key_strategy"),
+                "residual_window": settings.residual_window,
+                "key_strategy": settings.key_strategy,
                 "output_text": f"[ERROR] {exc}",
                 "output_tokens": 0,
                 "latency_s": 0.0,
@@ -392,7 +370,7 @@ def run_policy(
                 "output_length_delta_pct": 0.0,
             }
             if event_bus:
-                event_bus.emit_new("error", policy_name=policy_cfg["name"], prompt_id=prompt.id, error=str(exc))
+                event_bus.emit_new("error", policy_name=policy.name, prompt_id=prompt.id, error=str(exc))
 
         # Provisional scoring so early-stop and prompt_completed events
         # see a real verdict before score_results runs at the end.
@@ -414,7 +392,7 @@ def run_policy(
             else:
                 row["semantic_similarity"] = None
             row["verdict"] = compute_verdict(
-                row, bl if bl is not row else None, thresholds_cfg
+                row, bl if bl is not row else None, thresholds
             )
 
         rows.append(row)
@@ -422,7 +400,7 @@ def run_policy(
             writer.write_row(row)
 
         if event_bus:
-            event_bus.emit_new("prompt_completed", policy_name=policy_cfg["name"], prompt_id=prompt.id, verdict=row.get("verdict"))
+            event_bus.emit_new("prompt_completed", policy_name=policy.name, prompt_id=prompt.id, verdict=row.get("verdict"))
 
         # Early stopping
         if controller and controller.check_early_stop(row):
@@ -431,7 +409,7 @@ def run_policy(
             break
 
     if event_bus:
-        event_bus.emit_new("policy_completed", policy_name=policy_cfg["name"], rows_count=len(rows))
+        event_bus.emit_new("policy_completed", policy_name=policy.name, rows_count=len(rows))
 
     return rows
 
@@ -442,7 +420,7 @@ def run_policy(
 
 def score_results(
     rows: list[dict],
-    thresholds_cfg: dict | None = None,
+    thresholds: ThresholdsConfig | None = None,
     baseline_policy_name: str | None = None,
 ) -> list[dict]:
     """Compute baseline deltas, similarity, and verdicts on existing rows.
@@ -512,7 +490,7 @@ def score_results(
         else:
             row["semantic_similarity"] = None
 
-        row["verdict"] = compute_verdict(row, bl if bl is not row else None, thresholds_cfg)
+        row["verdict"] = compute_verdict(row, bl if bl is not row else None, thresholds)
 
     return rows
 
@@ -524,8 +502,7 @@ def score_results(
 def write_results(
     output_dir: Path,
     rows: list[dict],
-    study_cfg: dict,
-    model_cfg: dict,
+    study: StudyConfig,
     policies_used: list[dict],
     prompt_count: int,
     repetitions: int,
@@ -534,15 +511,15 @@ def write_results(
 ) -> dict:
     """Write all output artefacts and return the summary dict."""
     output_dir.mkdir(parents=True, exist_ok=True)
-    outputs_cfg = study_cfg.get("outputs", {})
+    outputs = study.outputs
 
     write_jsonl(output_dir / "rows.jsonl", rows)
     write_csv(
         output_dir / "workflow_compare.csv",
         rows,
-        truncate_output_to_chars=int(outputs_cfg.get("truncate_csv_output_to_chars", 180)),
+        truncate_output_to_chars=outputs.truncate_csv_output_to_chars,
     )
-    if bool(outputs_cfg.get("write_individual_text_files", True)):
+    if outputs.write_individual_text_files:
         write_text_outputs(output_dir, rows)
     write_examples_markdown(output_dir / "examples.md", rows)
 
@@ -552,9 +529,9 @@ def write_results(
         verdict_counts[v] = verdict_counts.get(v, 0) + 1
 
     summary = {
-        "study_name": study_cfg["name"],
+        "study_name": study.name,
         "study_config": str(study_config_path) if study_config_path else "",
-        "model_name": model_cfg["model_name"],
+        "model_name": study.model.model_name,
         "policy_count": len(policies_used),
         "prompt_count": prompt_count,
         "row_count": len(rows),
@@ -573,36 +550,39 @@ def write_results(
 # ---------------------------------------------------------------------------
 
 def run_workflow_study(
-    study_config_path: str | Path,
+    study: StudyConfig | str | Path,
     output_dir: str | Path,
-    policy_configs_arg: str | None = None,
-    runtime_overrides: dict | None = None,
+    *,
     progress_callback: Any | None = None,
-    model_config_override: str | Path | None = None,
-    config_overrides: list[str] | None = None,
-    policy_overrides: list[str] | None = None,
     prompt_ids: list[str] | None = None,
     prompt_categories: list[str] | None = None,
     prompt_pattern: str | None = None,
     single_mode: bool = False,
     event_bus: EventBus | None = None,
     controller: StudyController | None = None,
+    study_config_path: str | Path | None = None,
 ) -> dict:
     """Run the full workflow study.
 
-    This is the backward-compatible entry point that orchestrates
-    :func:`prepare_study`, :func:`run_policy`, :func:`score_results`,
-    and :func:`write_results`.
+    Orchestrates :func:`prepare_study`, :func:`run_policy`,
+    :func:`score_results`, and :func:`write_results`.
+
+    The CLI is responsible for loading the study module, applying any
+    ``--set`` / ``--KNOB`` overrides via ``replace_path``, and then passing
+    the resolved :class:`StudyConfig` here.
+
+    ``study_config_path`` is purely metadata for the run summary; it does
+    not affect loading.
     """
+    if isinstance(study, (str, Path)):
+        if study_config_path is None:
+            study_config_path = Path(study)
+        study = load_study_module(study)
+
     # --- Prepare (no GPU) ---
     ctx = prepare_study(
-        study_config_path=study_config_path,
+        study=study,
         output_dir=output_dir,
-        policy_configs_arg=policy_configs_arg,
-        runtime_overrides=runtime_overrides,
-        model_config_override=model_config_override,
-        config_overrides=config_overrides,
-        policy_overrides=policy_overrides,
         prompt_ids=prompt_ids,
         prompt_categories=prompt_categories,
         prompt_pattern=prompt_pattern,
@@ -613,8 +593,7 @@ def run_workflow_study(
     if event_bus is None:
         event_bus = EventBus()
     if controller is None:
-        early_stop_cfg = ctx.study_cfg.get("early_stop")
-        controller = StudyController(event_bus=event_bus, early_stop_cfg=early_stop_cfg)
+        controller = StudyController(event_bus=event_bus, early_stop_cfg=ctx.study.early_stop)
 
     # Wire progress_callback as an event subscriber
     if progress_callback:
@@ -622,7 +601,7 @@ def run_workflow_study(
             pass  # progress_callback is called directly in run_policy
         event_bus.subscribe(_progress_subscriber)
 
-    event_bus.emit_new("study_started", study_name=ctx.study_cfg.get("name", ""))
+    event_bus.emit_new("study_started", study_name=ctx.study.name)
 
     # --- Incremental writer ---
     writer = IncrementalWriter(ctx.output_dir)
@@ -639,14 +618,13 @@ def run_workflow_study(
     loader_name = None
     needs_reload = True
 
-    for policy_idx, policy_path in enumerate(ctx.policy_paths):
-        policy_cfg = load_yaml(policy_path)
-        policy_cfg = _apply_policy_overrides(policy_cfg, ctx.policy_overrides)
-        validate_config(policy_cfg, "policy", policy_path)
-        if not bool(policy_cfg.get("enabled", False)):
+    legacy_model_cfg = model_to_legacy_dict(ctx.study.model)
+
+    for policy_idx, policy in enumerate(ctx.study.policies):
+        if not policy.enabled:
             continue
 
-        adapter_cls = load_object(policy_cfg["adapter"]["import_path"])
+        adapter_cls = load_object(policy.adapter.import_path)
         adapter = adapter_cls()
 
         # Load or reuse model
@@ -657,32 +635,35 @@ def run_workflow_study(
                 gc.collect()
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-            model, tokenizer, loader_name = load_model_and_tokenizer(ctx.model_cfg)
+            model, tokenizer, loader_name = load_model_and_tokenizer(legacy_model_cfg)
             needs_reload = False
 
-        model, tokenizer = adapter.prepare_model(model, tokenizer, ctx.model_cfg, policy_cfg)
+        legacy_policy_cfg = policy_to_legacy_dict(policy)
+        model, tokenizer = adapter.prepare_model(
+            model, tokenizer, legacy_model_cfg, legacy_policy_cfg
+        )
 
         policy_metadata = {
-            "name": policy_cfg["name"],
-            "comparison_label": policy_cfg.get("comparison_label", policy_cfg["name"]),
+            "name": policy.name,
+            "comparison_label": policy.comparison_label,
             "adapter_name": getattr(adapter, "name", adapter.__class__.__name__),
             "loader_name": loader_name,
-            "adapter_description": adapter.describe(policy_cfg),
-            "policy_path": str(policy_path),
+            "adapter_description": adapter.describe(legacy_policy_cfg),
+            "import_path": policy.adapter.import_path,
         }
         policies_used.append(policy_metadata)
 
         # Warmup — prime JIT/CUDA kernels
-        generate_one(model, tokenizer, "Say hello.", ctx.runtime_cfg)
+        generate_one(model, tokenizer, "Say hello.", _runtime_to_dict(ctx.runtime))
 
         # Run all prompts for this policy
         controller.reset_policy_state()
         policy_rows = run_policy(
-            ctx, policy_cfg, model, tokenizer, adapter,
+            ctx, policy, model, tokenizer, adapter,
             writer=writer,
             progress_callback=progress_callback,
             policy_index=policy_idx,
-            total_policies=len(ctx.policy_paths),
+            total_policies=len(ctx.study.policies),
             event_bus=event_bus,
             controller=controller,
             baseline_by_prompt=baseline_by_prompt,
@@ -698,7 +679,7 @@ def run_workflow_study(
             adapter.cleanup(model)
             needs_reload = True
 
-        if needs_reload and bool(ctx.runtime_cfg.get("cleanup_between_policies", True)):
+        if needs_reload and ctx.runtime.cleanup_between_policies:
             pass  # Model will be reloaded at top of next iteration
 
         if controller.stop_requested:
@@ -711,7 +692,7 @@ def run_workflow_study(
         raise RuntimeError("No enabled policies were run. Enable at least one policy config.")
 
     # --- Post-processing ---
-    score_results(rows, ctx.thresholds_cfg, baseline_policy_name=ctx.baseline_policy_name)
+    score_results(rows, ctx.thresholds, baseline_policy_name=ctx.baseline_policy_name)
 
     # Resolve the effective baseline name for provenance: if the user did not
     # set one and exactly one policy ran, record that policy's name so the
@@ -726,12 +707,11 @@ def run_workflow_study(
     summary = write_results(
         output_dir=ctx.output_dir,
         rows=rows,
-        study_cfg=ctx.study_cfg,
-        model_cfg=ctx.model_cfg,
+        study=ctx.study,
         policies_used=policies_used,
         prompt_count=len(ctx.prompt_pack),
         repetitions=ctx.repetitions,
-        study_config_path=Path(study_config_path),
+        study_config_path=Path(study_config_path) if study_config_path else None,
         baseline_policy_name=effective_baseline,
     )
 

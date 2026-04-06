@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .schema import StudyConfig
 
 
 @dataclass
@@ -36,19 +39,42 @@ class AttentionBlockRef:
 
 @dataclass
 class StudyContext:
-    """Holds all resolved configuration for a study run (no GPU state)."""
+    """Holds all resolved configuration for a study run (no GPU state).
 
-    study_cfg: dict[str, Any]
-    model_cfg: dict[str, Any]
-    model_cfg_path: Path
+    Wraps a fully-validated :class:`StudyConfig` plus the resolved prompt pack
+    and output directory. The dataclass is intentionally mutable so the runner
+    can swap in filtered prompts after construction.
+    """
+
+    study: "StudyConfig"
     prompt_pack: list[Any]  # list[PromptSpec] — forward ref avoidance
-    policy_paths: list[Path]
-    runtime_cfg: dict[str, Any]
-    thresholds_cfg: dict[str, Any]
     output_dir: Path
-    repetitions: int = 1
-    baseline_policy_name: str | None = None
-    policy_overrides: list[str] = field(default_factory=list)
+
+    # Convenience accessors so existing call sites that read these fields
+    # continue to work without needing to spell out ``ctx.study.<X>``.
+    @property
+    def baseline_policy_name(self) -> str | None:
+        return self.study.baseline_policy_name
+
+    @property
+    def repetitions(self) -> int:
+        return self.study.runtime.repetitions
+
+    @property
+    def runtime(self):
+        return self.study.runtime
+
+    @property
+    def thresholds(self):
+        return self.study.thresholds
+
+    @property
+    def policies(self):
+        return self.study.policies
+
+    @property
+    def model(self):
+        return self.study.model
 
 
 @dataclass(frozen=True)
