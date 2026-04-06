@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from turboquant_workflow_eval.reporting import slugify, write_csv, write_examples_markdown, write_jsonl
+import json
+
+from turboquant_workflow_eval.reporting import (
+    IncrementalWriter,
+    slugify,
+    write_csv,
+    write_examples_markdown,
+    write_jsonl,
+)
 
 
 def test_slugify() -> None:
@@ -74,3 +82,56 @@ def test_csv_with_repetition_stats(tmp_path: Path) -> None:
     assert "latency_mean" in header
     assert "latency_std" in header
     assert "repetitions" in header
+
+
+def _minimal_finalize_args() -> dict:
+    return {
+        "study_cfg": {"name": "s"},
+        "model_cfg": {"model_name": "m"},
+        "policies_used": [{"name": "baseline"}],
+        "prompt_count": 1,
+        "repetitions": 1,
+    }
+
+
+def _minimal_row() -> dict:
+    return {
+        "policy_name": "baseline",
+        "comparison_label": "baseline",
+        "adapter_name": "none",
+        "prompt_id": "p1",
+        "category": "reasoning",
+        "title": "demo",
+        "watch_for": "",
+        "prompt_text": "hello",
+        "rendered_prompt": "hello",
+        "prompt_tokens": 3,
+        "output_tokens": 10,
+        "latency_s": 0.1,
+        "tokens_per_second": 100.0,
+        "peak_vram_gb": None,
+        "output_text": "hi",
+        "math_correct": None,
+        "verdict": "green",
+    }
+
+
+def test_incremental_finalize_with_baseline_policy_name(tmp_path: Path) -> None:
+    writer = IncrementalWriter(tmp_path)
+    writer.write_row(_minimal_row())
+    summary = writer.finalize(**_minimal_finalize_args(), baseline_policy_name="baseline")
+    assert summary["baseline_policy_name"] == "baseline"
+    on_disk = json.loads((tmp_path / "run_summary.json").read_text())
+    assert on_disk["baseline_policy_name"] == "baseline"
+
+
+def test_incremental_finalize_without_baseline_policy_name(tmp_path: Path) -> None:
+    writer = IncrementalWriter(tmp_path)
+    writer.write_row(_minimal_row())
+    summary = writer.finalize(**_minimal_finalize_args())
+    assert summary["baseline_policy_name"] is None
+    assert summary["study_name"] == "s"
+    assert summary["row_count"] == 1
+    assert "verdict_summary" in summary
+    on_disk = json.loads((tmp_path / "run_summary.json").read_text())
+    assert on_disk["baseline_policy_name"] is None
