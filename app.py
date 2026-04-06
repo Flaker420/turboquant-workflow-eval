@@ -428,6 +428,7 @@ def run_study_ui(study_config_path, policy_paths, output_dir,
                  repetitions, temperature, max_new_tokens, shuffle_policies,
                  model_config_override,
                  prompt_category_filter, prompt_id_filter,
+                 policy_overrides_text="",
                  progress=gr.Progress()):
     global _study_controller
     if not study_config_path:
@@ -456,6 +457,13 @@ def run_study_ui(study_config_path, policy_paths, output_dir,
     prompt_cats = [c.strip() for c in (prompt_category_filter or "").split(",") if c.strip()] or None
     prompt_ids = [i.strip() for i in (prompt_id_filter or "").split(",") if i.strip()] or None
 
+    # Policy overrides (one per line in the UI textbox)
+    policy_overrides = [
+        line.strip()
+        for line in (policy_overrides_text or "").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ] or None
+
     # Event bus + controller for live tracking
     event_bus = EventBus()
     _study_controller = StudyController(event_bus=event_bus)
@@ -480,6 +488,7 @@ def run_study_ui(study_config_path, policy_paths, output_dir,
             runtime_overrides=overrides or None,
             progress_callback=_progress_cb,
             model_config_override=model_config_override or None,
+            policy_overrides=policy_overrides,
             prompt_ids=prompt_ids,
             prompt_categories=prompt_cats,
             event_bus=event_bus,
@@ -575,6 +584,24 @@ def build_study_tab():
                 max_new_tokens = gr.Number(label="Max New Tokens", precision=0)
             shuffle_policies = gr.Checkbox(label="Shuffle policy order", value=False)
 
+        with gr.Accordion("Policy Overrides", open=False):
+            gr.Markdown(
+                "Override keys inside policy YAMLs at load time. One override per line. "
+                "Format: `<policy_name|*>.<dot.key>=<value>`. The first segment matches "
+                "`policy_cfg['name']`; `*` matches every policy.\n\n"
+                "Examples:\n"
+                "```\n"
+                "turboquant_safe.settings.key_strategy=mse\n"
+                "*.settings.bit_width=8\n"
+                "baseline.enabled=false\n"
+                "```"
+            )
+            policy_overrides_box = gr.Textbox(
+                label="Policy overrides",
+                lines=4,
+                placeholder="turboquant_safe.settings.key_strategy=mse",
+            )
+
         with gr.Accordion("Prompt Filtering", open=False):
             gr.Markdown("Filter which prompts to run. Leave blank for all prompts.")
             prompt_category_filter = gr.Textbox(
@@ -627,7 +654,8 @@ def build_study_tab():
             inputs=[study_dd, policy_cb, output_dir,
                     repetitions, temperature, max_new_tokens, shuffle_policies,
                     model_override_dd,
-                    prompt_category_filter, prompt_id_filter],
+                    prompt_category_filter, prompt_id_filter,
+                    policy_overrides_box],
             outputs=[study_status, study_json, live_verdict_html],
         )
         pause_btn.click(fn=pause_study, outputs=study_status)

@@ -331,7 +331,8 @@ The `python -m turboquant_workflow_eval` entry point (and `scripts/run_workflow_
 | `--output-dir PATH` | Output directory (default: `outputs/`) |
 | `--policy-configs P1,P2` | Override policy configs from study YAML |
 | `--model-config PATH` | Override model config from study YAML |
-| `--set KEY=VALUE` | Override any config value with dot-notation (repeatable). In `--rescore` mode, both `thresholds.latency_red_pct=50` and the bare `latency_red_pct=50` forms are accepted. |
+| `--set KEY=VALUE` | Override any **study** config value with dot-notation (repeatable). In `--rescore` mode, both `thresholds.latency_red_pct=50` and the bare `latency_red_pct=50` forms are accepted. |
+| `--set-policy NAME.KEY=VALUE` | Override a key inside a **policy** YAML at load time (repeatable). Format: `<policy_name\|*>.<dot.key>=<value>`. Examples: `--set-policy turboquant_safe.settings.key_strategy=mse`, `--set-policy '*.settings.bit_width=8'`, `--set-policy baseline.enabled=false`. |
 | `--repetitions N` | Shorthand for `--set runtime.repetitions=N` |
 | `--prompt-id ID` | Run only this prompt (repeatable for multiple IDs) |
 | `--prompt-category CAT` | Run only prompts in this category (repeatable) |
@@ -362,7 +363,18 @@ python -m turboquant_workflow_eval --study-config configs/studies/default.yaml \
 python -m turboquant_workflow_eval \
   --rescore outputs/study_run/rows.jsonl \
   --set thresholds.latency_red_pct=50
+
+# Force every policy to use plain MSE (no QJL) without editing YAML
+python -m turboquant_workflow_eval --study-config configs/studies/default.yaml \
+  --set-policy '*.settings.key_strategy=mse'
+
+# Tweak only the safe policy: 8-bit, MSE-only
+python -m turboquant_workflow_eval --study-config configs/studies/default.yaml \
+  --set-policy turboquant_safe.settings.bit_width=8 \
+  --set-policy turboquant_safe.settings.key_strategy=mse
 ```
+
+The Gradio UI's **Study Runner** tab has a matching **Policy Overrides** accordion: paste one override per line and they are applied to every loaded policy YAML before the run.
 
 ## Outputs
 

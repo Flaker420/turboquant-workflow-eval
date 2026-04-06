@@ -48,6 +48,7 @@ class StudyContext:
     output_dir: Path
     repetitions: int = 1
     baseline_policy_name: str | None = None
+    policy_overrides: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

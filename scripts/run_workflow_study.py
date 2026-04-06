@@ -26,6 +26,14 @@ def main() -> None:
         help="Override any config value (e.g. --set runtime.max_new_tokens=128)",
     )
     parser.add_argument("--repetitions", type=int, default=None, help="Override repetition count")
+    parser.add_argument(
+        "--set-policy", action="append", dest="policy_overrides",
+        metavar="NAME.KEY=VALUE", default=[],
+        help=(
+            "Override a key inside a policy YAML at load time. "
+            "Format: '<policy_name|*>.<dot.key>=<value>'. Repeatable."
+        ),
+    )
 
     # Prompt filtering
     parser.add_argument("--prompt-id", action="append", dest="prompt_ids", default=None)
@@ -51,6 +59,7 @@ def main() -> None:
             overrides=args.overrides or None,
             policy_configs_arg=args.policy_configs,
             model_config_override=args.model_config,
+            policy_overrides=args.policy_overrides or None,
             prompt_ids=args.prompt_ids,
             prompt_categories=args.prompt_categories,
             prompt_pattern=args.prompt_filter,
@@ -63,6 +72,7 @@ def main() -> None:
         policy_configs_arg=args.policy_configs,
         model_config_override=args.model_config,
         config_overrides=args.overrides or None,
+        policy_overrides=args.policy_overrides or None,
         prompt_ids=args.prompt_ids,
         prompt_categories=args.prompt_categories,
         prompt_pattern=args.prompt_filter,
