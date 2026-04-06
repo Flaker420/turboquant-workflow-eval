@@ -8,7 +8,7 @@ Which compression policy is usable in my workflow, and what degrades when I push
 
 ## Supported models
 
-- **Qwen3.5-9B** -- hybrid architecture (8 full-attention + 24 DeltaNet layers), uses `Qwen35KVBackend`. Config: `configs/model/qwen35_9b_text_only.yaml`. Default study: `configs/studies/default.yaml`.
+- **Qwen3.5-9B** -- hybrid architecture (8 full-attention + 24 DeltaNet layers), uses `Qwen35KVBackend`. Config: `configs/model/qwen35_9b_text_only.yaml`. Default study: `configs/studies/default_qwen35_9b.yaml` (also reachable as `configs/studies/default.yaml`, a symlink kept for backwards compatibility).
 - **Qwen3-8B** -- dense attention (36 layers), uses `Qwen3DenseKVBackend`. Config: `configs/model/qwen3_8b.yaml`. Default study: `configs/studies/default_qwen3_8b.yaml`.
 - **Qwen2.5-3B-Instruct** -- dense attention (36 layers, GQA: 16 Q / 2 KV heads, head_dim 128), uses `Qwen25DenseKVBackend`. Config: `configs/model/qwen25_3b.yaml`. Default study: `configs/studies/default_qwen25_3b.yaml`.
 
