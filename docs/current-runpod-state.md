@@ -32,7 +32,7 @@ Validated and working in this environment:
 - attention-block discovery
 - preflight instrumentation
 - baseline workflow study
-- native Qwen3.5 non-thinking toggle via `enable_thinking=False` in local `apply_chat_template(...)`
+- native Qwen3.5 non-thinking toggle via `enable_thinking=False` in local `apply_chat_template(...)` (the harness probes the tokenizer and falls back gracefully on Llama / Mistral / Gemma tokenizers that do not accept the kwarg)
 
 ## What this means for the repo
 

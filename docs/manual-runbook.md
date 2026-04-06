@@ -22,6 +22,10 @@ export TOKENIZERS_PARALLELISM=false
 
 On the validated RunPod environment, the system CUDA toolkit is 12.8. Installing `torch==2.10.0+cu128` first keeps the Python stack aligned with that toolkit. Avoid installing a generic latest torch wheel into this venv.
 
+### Bumping the turboquant-core pin
+
+`turboquant-core` is pinned to a specific commit SHA in **both** `requirements.txt` and `pyproject.toml`. To upgrade, replace the `@<sha>` suffix in both files with the new commit SHA, then re-run `pip install -r requirements.txt` (or `pip install -e .`). `requirements-runpod-cu128.txt` does not pin `turboquant-core` and does not need to be touched.
+
 ## 2. Optional fast-path packages
 
 ```bash
@@ -218,9 +222,22 @@ python -m turboquant_workflow_eval \
   --set thresholds.latency_red_pct=50
 ```
 
+`--study-config` is **optional** in `--rescore` mode. When supplied, the study YAML's `thresholds:` block is used as the base and `--set` overrides are layered on top:
+
+```bash
+python -m turboquant_workflow_eval \
+  --study-config configs/studies/default.yaml \
+  --rescore outputs/study_compare/rows.jsonl \
+  --set thresholds.latency_red_pct=50
+```
+
+Bare `--set latency_red_pct=50` (without the `thresholds.` prefix) is also accepted in rescore mode and is normalized to a `thresholds.` override automatically.
+
+The baseline policy is taken from the sibling `run_summary.json` next to the rows JSONL, so you do not need to repeat `baseline_policy_name` on the command line. A refreshed `run_summary.json` is always written next to the rescored rows with `rescored: true`, `rescore_thresholds`, and `rescore_verdicts_changed` recording exactly what was applied.
+
 This recomputes verdicts on existing `rows.jsonl` and rewrites the CSV and markdown files. The Gradio UI also has a **Re-Score** tab with threshold sliders for interactive tuning.
 
-Per-category thresholds are supported:
+Per-category thresholds are supported (see `scoring._resolve_thresholds`):
 
 ```bash
 python -m turboquant_workflow_eval \

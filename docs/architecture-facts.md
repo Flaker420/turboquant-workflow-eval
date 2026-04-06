@@ -22,6 +22,14 @@ TurboQuant-core backend: `Qwen35KVBackend` -- compresses 8 full-attention layers
 
 TurboQuant-core backend: `Qwen3DenseKVBackend` -- applies compression uniformly across all 36 layers. Keys use TQ_prod quantization, values use TQ_MSE.
 
+## Qwen2.5-3B-Instruct (dense, not yet wired)
+
+- 36 language-model layers
+- all layers use standard attention
+- 16 query heads / 2 KV heads, head_dim 128
+
+TurboQuant-core backend: `Qwen25DenseKVBackend` (with `patch_qwen25_with_tq` as the hook helper). The backend exists in turboquant-core but the harness does not bundle a `configs/model/qwen25_*.yaml` yet -- add one analogous to `configs/model/qwen3_8b.yaml` if you want to evaluate it.
+
 ## What this means for the evaluation
 
 - Do **not** spend time tuning architecture internals

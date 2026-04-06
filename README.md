@@ -72,11 +72,19 @@ To run a compression comparison, no additional wiring is needed -- just run the 
 
 ## turboquant-core integration
 
-[turboquant-core](https://github.com/Flaker420/turboquant-core) is listed in `requirements.txt` and installed automatically. The built-in `TurboQuantAdapter` (`src/turboquant_workflow_eval/adapters/turboquant.py`) wraps the core library's adapter, handling the `model_name` to `name` field normalization between the eval harness and the core library.
+[turboquant-core](https://github.com/Flaker420/turboquant-core) is listed in `requirements.txt` and installed automatically. The built-in `TurboQuantAdapter` (`src/turboquant_workflow_eval/adapters/turboquant.py`) wraps the core library's adapter, handling the `model_name` → `name` field normalization between the eval harness and the core library, and validating that `model_name` is set on the model config (raises `ValueError` early if not).
 
-The dependency is pinned to a specific commit SHA in both `requirements.txt` and `pyproject.toml`. To bump the pin, replace the SHA after `@` in both files with the new core commit and re-run `pip install -e .`.
+The dependency is pinned to a specific commit SHA in both `requirements.txt` and `pyproject.toml`. To bump the pin, replace the SHA after `@` in both files with the new core commit and re-run `pip install -e .`. The same procedure applies on RunPod (see `docs/manual-runbook.md` step 1).
 
-Both `safe_template.yaml` (bit_width 4) and `aggressive_template.yaml` (bit_width 2) are pre-configured and enabled. See `docs/adapter-interface.md` for the adapter contract if you need to write a custom adapter.
+Both `safe_template.yaml` (bit_width 4) and `aggressive_template.yaml` (bit_width 2) are pre-configured and enabled. They forward `bit_width`, `seed`, `residual_window`, and `key_strategy` from `settings:` straight into turboquant-core; all four are recorded in `describe()` and on every result row, so they are visible in `run_summary.json` and the per-row CSV/JSONL outputs. See `docs/adapter-interface.md` for the adapter contract if you need to write a custom adapter.
+
+> **Note:** turboquant-core ships a `Qwen25DenseKVBackend` for Qwen2.5-3B-Instruct in addition to the Qwen3.5/Qwen3 backends. The harness does not bundle a Qwen2.5 model config yet -- add one analogous to `configs/model/qwen3_8b.yaml` if you want to evaluate it.
+
+## Study configuration
+
+Study YAMLs (`configs/studies/*.yaml`) collect the model config, prompt pack, policy list, runtime parameters, and thresholds. A multi-policy study **must** declare `baseline_policy_name:` -- this names the policy whose rows are used as the comparison baseline for similarity, latency delta, and verdicts. `validate_study_config` raises a `ConfigValidationError` at load time if the field is missing on a multi-policy run. All bundled studies declare `baseline_policy_name: baseline`.
+
+Single-policy studies do not require the field; the only present policy is used as its own baseline (this is just provenance, since there is nothing to compare against).
 
 ## RunPod-first design
 
@@ -314,18 +322,18 @@ The `python -m turboquant_workflow_eval` entry point (and `scripts/run_workflow_
 
 | Flag | Description |
 |------|-------------|
-| `--study-config PATH` | Path to study YAML (required) |
+| `--study-config PATH` | Path to study YAML. Required for normal and `--dry-run` modes; **optional in `--rescore` mode**, where it serves as a thresholds source. |
 | `--output-dir PATH` | Output directory (default: `outputs/`) |
 | `--policy-configs P1,P2` | Override policy configs from study YAML |
 | `--model-config PATH` | Override model config from study YAML |
-| `--set KEY=VALUE` | Override any config value with dot-notation (repeatable) |
+| `--set KEY=VALUE` | Override any config value with dot-notation (repeatable). In `--rescore` mode, both `thresholds.latency_red_pct=50` and the bare `latency_red_pct=50` forms are accepted. |
 | `--repetitions N` | Shorthand for `--set runtime.repetitions=N` |
 | `--prompt-id ID` | Run only this prompt (repeatable for multiple IDs) |
 | `--prompt-category CAT` | Run only prompts in this category (repeatable) |
 | `--prompt-filter REGEX` | Filter prompts by regex on id/title |
 | `--single` | Quick smoke test: 1st prompt, 1st policy, 1 rep |
 | `--dry-run` | Validate all configs without GPU (runs in <1s) |
-| `--rescore ROWS_JSONL` | Re-score existing results with new thresholds (no GPU) |
+| `--rescore ROWS_JSONL` | Re-score existing results with new thresholds (no GPU). Reads `baseline_policy_name` from a sibling `run_summary.json` if present, and writes a refreshed `run_summary.json` with `rescored: true`, `rescore_thresholds`, and `rescore_verdicts_changed`. |
 
 ### Common examples
 
@@ -363,7 +371,25 @@ For each policy you test, the repo produces concrete artifacts you can compare:
 
 That gives you a direct **works / degrades / fails** view instead of a research-heavy sweep.
 
-Results can be re-scored with different thresholds using `--rescore` without re-running inference.
+### Row schema
+
+Every row carries the same set of fields whether the prompt succeeded or failed. A successful row has `verdict ∈ {green, yellow, red}` plus `output_text`, `output_tokens`, `latency_s`, `tokens_per_second`, `peak_vram_gb`, `semantic_similarity`, `output_length_delta_pct`, and (for code prompts) `code_verdict` / `code_passed` / `code_failed` / `code_errors`. A failed row has `error` set, `verdict == "error"`, `code_verdict == "error"`, `output_tokens == 0`, and `semantic_similarity == None`. Filter on `verdict == "error"` to find failed prompts; `score_results` skips them when computing baseline deltas, and refuses to use an error row as the baseline reference for a multi-policy study.
+
+### Live verdicts and early stop
+
+`run_policy` populates a shared baseline lookup as the baseline policy executes and stamps a real `verdict` (plus `semantic_similarity` and `output_length_delta_pct`) on every row before emitting the `prompt_completed` event. This means the early-stop controller can react to red verdicts as they happen instead of only after the full study finishes. Two early-stop knobs are read from `early_stop:` in the study YAML:
+
+```yaml
+early_stop:
+  max_red_verdicts: 5      # stop after this many red verdicts across all policies
+  max_error_rate: 0.5      # stop if errored / total exceeds this fraction
+```
+
+`score_results` runs at the end of the study and re-stamps the same fields idempotently, so the final outputs match what the live event stream reported.
+
+### Re-scoring
+
+Results can be re-scored with different thresholds using `--rescore` without re-running inference. `--rescore` accepts an optional `--study-config` that supplies a `thresholds:` block as the base, then layers `--set thresholds.<key>=<value>` (or the bare `--set <key>=<value>`) overrides on top. The baseline policy is taken from the sibling `run_summary.json` next to the rows JSONL, falling back to single-policy auto-detection. A refreshed `run_summary.json` is always written next to the rescored rows with `rescored: true`, `rescore_thresholds`, and `rescore_verdicts_changed` fields recording exactly what was applied.
 
 ## Repository layout
 
