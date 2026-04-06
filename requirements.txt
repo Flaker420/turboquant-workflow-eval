@@ -2,7 +2,7 @@ accelerate>=1.0
 numpy>=1.26
 packaging>=24.2
 pyyaml>=6.0.2
-transformers>=4.57.0
+transformers>=5.5.0
 gradio>=4.0
 turboquant-core @ git+https://github.com/Flaker420/turboquant-core.git@a59ff10
 
