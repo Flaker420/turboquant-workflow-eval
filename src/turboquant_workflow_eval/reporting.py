@@ -225,6 +225,7 @@ class IncrementalWriter:
         repetitions: int,
         truncate_csv_output_to_chars: int = 180,
         write_individual_text_files: bool = True,
+        baseline_policy_name: str | None = None,
     ) -> dict:
         """Write CSV, markdown, and summary.  Returns the summary dict."""
         self._file.close()
@@ -251,6 +252,7 @@ class IncrementalWriter:
             "prompt_count": prompt_count,
             "row_count": len(rows),
             "repetitions": repetitions,
+            "baseline_policy_name": baseline_policy_name,
             "verdict_summary": verdict_counts,
             "policies_used": policies_used,
             "output_dir": str(self.output_dir),
