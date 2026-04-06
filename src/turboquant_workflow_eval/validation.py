@@ -23,6 +23,7 @@ def dry_run(
     overrides: list[str] | None = None,
     policy_configs_arg: str | None = None,
     model_config_override: str | Path | None = None,
+    policy_overrides: list[str] | None = None,
     prompt_ids: list[str] | None = None,
     prompt_categories: list[str] | None = None,
     prompt_pattern: str | None = None,
@@ -107,6 +108,8 @@ def dry_run(
             continue
         try:
             pcfg = load_yaml(pp)
+            from .config import apply_policy_overrides
+            pcfg = apply_policy_overrides(pcfg, policy_overrides)
             validate_config(pcfg, "policy", pp)
         except (ConfigValidationError, TypeError, ValueError) as exc:
             errors.append(f"Policy config {pp}: {exc}")

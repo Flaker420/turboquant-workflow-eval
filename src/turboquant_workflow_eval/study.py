@@ -9,7 +9,14 @@ from typing import Any
 import torch
 
 from .code_runner import extract_python_code, run_code_with_tests
-from .config import load_yaml, load_yaml_with_overrides, resolve_relative_path, validate_config
+from .config import (
+    apply_dot_overrides,
+    apply_policy_overrides as _apply_policy_overrides,
+    load_yaml,
+    load_yaml_with_overrides,
+    resolve_relative_path,
+    validate_config,
+)
 from .generation import generate_one
 from .import_utils import load_object
 from .model_loader import load_model_and_tokenizer
@@ -103,6 +110,9 @@ def _load_policy_configs(study_config_path: Path, study_cfg: dict, policy_config
     return [resolve_relative_path(study_config_path, item) for item in study_cfg.get("policy_configs", [])]
 
 
+# _apply_policy_overrides lives in .config so tests can import it without torch.
+
+
 def _aggregate_stats(values: list[float]) -> dict[str, float]:
     """Compute mean and std for a list of values."""
     n = len(values)
@@ -126,6 +136,7 @@ def prepare_study(
     runtime_overrides: dict | None = None,
     model_config_override: str | Path | None = None,
     config_overrides: list[str] | None = None,
+    policy_overrides: list[str] | None = None,
     prompt_ids: list[str] | None = None,
     prompt_categories: list[str] | None = None,
     prompt_pattern: str | None = None,
@@ -210,6 +221,7 @@ def prepare_study(
         output_dir=output_dir,
         repetitions=repetitions,
         baseline_policy_name=study_cfg.get("baseline_policy_name"),
+        policy_overrides=list(policy_overrides or []),
     )
 
 
@@ -568,6 +580,7 @@ def run_workflow_study(
     progress_callback: Any | None = None,
     model_config_override: str | Path | None = None,
     config_overrides: list[str] | None = None,
+    policy_overrides: list[str] | None = None,
     prompt_ids: list[str] | None = None,
     prompt_categories: list[str] | None = None,
     prompt_pattern: str | None = None,
@@ -589,6 +602,7 @@ def run_workflow_study(
         runtime_overrides=runtime_overrides,
         model_config_override=model_config_override,
         config_overrides=config_overrides,
+        policy_overrides=policy_overrides,
         prompt_ids=prompt_ids,
         prompt_categories=prompt_categories,
         prompt_pattern=prompt_pattern,
@@ -627,6 +641,7 @@ def run_workflow_study(
 
     for policy_idx, policy_path in enumerate(ctx.policy_paths):
         policy_cfg = load_yaml(policy_path)
+        policy_cfg = _apply_policy_overrides(policy_cfg, ctx.policy_overrides)
         validate_config(policy_cfg, "policy", policy_path)
         if not bool(policy_cfg.get("enabled", False)):
             continue

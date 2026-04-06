@@ -87,6 +87,41 @@ def _coerce_value(raw: str) -> Any:
     return raw
 
 
+def apply_policy_overrides(policy_cfg: dict, overrides: list[str] | None) -> dict:
+    """Apply ``--set-policy`` overrides to *policy_cfg*.
+
+    Override syntax: ``<name_or_*>.<dotted.key>=<value>``. The first segment
+    matches against ``policy_cfg["name"]``; ``*`` matches every policy. Any
+    remaining segments form a dot-path applied via :func:`apply_dot_overrides`.
+
+    Examples::
+
+        turboquant_safe.settings.key_strategy=mse
+        *.settings.bit_width=8
+        baseline.enabled=false
+
+    Returns the (possibly new) policy config. Returns the original object
+    unchanged if *overrides* is empty or no override matches this policy.
+    """
+    if not overrides:
+        return policy_cfg
+    name = policy_cfg.get("name", "")
+    relevant: list[str] = []
+    for item in overrides:
+        if "=" not in item or "." not in item.split("=", 1)[0]:
+            raise ValueError(
+                f"--set-policy override must be '<name|*>.<dot.key>=<value>', got {item!r}"
+            )
+        head, value = item.split("=", 1)
+        target_name, _, dot_key = head.partition(".")
+        if target_name not in ("*", name):
+            continue
+        relevant.append(f"{dot_key}={value}")
+    if relevant:
+        policy_cfg = apply_dot_overrides(policy_cfg, relevant)
+    return policy_cfg
+
+
 def apply_dot_overrides(cfg: dict, overrides: list[str]) -> dict:
     """Apply ``key.subkey=value`` overrides to *cfg*.
 

@@ -77,6 +77,19 @@ settings:
 
 `adapter.import_path` must match `module.path:ClassName` -- this is enforced at config load time by `validate_policy_config`. The `settings` block is passed unchanged into the adapter; for the built-in `TurboQuantAdapter` the supported keys are `bit_width`, `seed`, `residual_window`, `key_strategy`, and (for advanced use) `model_variant`. All of them are recorded in `describe()` so they appear in `run_summary.json` and per-row CSV/JSONL output.
 
+### Overriding policy settings without editing the YAML
+
+Any key inside a policy YAML can be overridden at load time without touching the file on disk. From the CLI:
+
+```bash
+python -m turboquant_workflow_eval --study-config configs/studies/default.yaml \
+  --set-policy turboquant_safe.settings.key_strategy=mse \
+  --set-policy '*.settings.bit_width=8' \
+  --set-policy baseline.enabled=false
+```
+
+The first segment is matched against `policy_cfg["name"]`; `*` matches every policy. The remaining dot-path is applied via `apply_dot_overrides`. The Gradio UI exposes the same mechanism through the **Policy Overrides** accordion on the Study Runner tab — one override per line. Overrides are applied before `validate_policy_config`, so an override that produces an invalid policy fails fast with a clear error.
+
 ## Important
 
 This repository does not assume every backend mutates the model the same way. The adapter layer exists so you can integrate:

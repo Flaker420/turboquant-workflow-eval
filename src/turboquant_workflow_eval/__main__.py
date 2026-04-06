@@ -58,6 +58,21 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         help="Override repetition count (shorthand for --set runtime.repetitions=N)",
     )
+    parser.add_argument(
+        "--set-policy",
+        action="append",
+        dest="policy_overrides",
+        metavar="NAME.KEY=VALUE",
+        default=[],
+        help=(
+            "Override a key inside a policy YAML at load time. Format: "
+            "'<policy_name|*>.<dot.key>=<value>'. The first segment matches "
+            "policy_cfg['name']; '*' matches every policy. Examples: "
+            "--set-policy turboquant_safe.settings.key_strategy=mse "
+            "--set-policy '*.settings.bit_width=8' "
+            "--set-policy baseline.enabled=false. Can be repeated."
+        ),
+    )
 
     # --- New: prompt filtering ---
     parser.add_argument(
@@ -120,6 +135,7 @@ def main(argv: list[str] | None = None) -> None:
             overrides=args.overrides or None,
             policy_configs_arg=args.policy_configs,
             model_config_override=args.model_config,
+            policy_overrides=args.policy_overrides or None,
             prompt_ids=args.prompt_ids,
             prompt_categories=args.prompt_categories,
             prompt_pattern=args.prompt_filter,
@@ -151,6 +167,7 @@ def main(argv: list[str] | None = None) -> None:
         runtime_overrides=None,
         model_config_override=args.model_config,
         config_overrides=args.overrides or None,
+        policy_overrides=args.policy_overrides or None,
         prompt_ids=args.prompt_ids,
         prompt_categories=args.prompt_categories,
         prompt_pattern=args.prompt_filter,
