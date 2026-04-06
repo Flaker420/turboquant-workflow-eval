@@ -98,8 +98,6 @@ This repository does not assume every backend mutates the model the same way. Th
 | Qwen3-8B (dense) | `Qwen3DenseKVBackend` | `patch_qwen3_with_tq` |
 | Qwen2.5-3B-Instruct (dense) | `Qwen25DenseKVBackend` | `patch_qwen25_with_tq` |
 
-The `Qwen2.5` backend is shipped by core but **not yet wired into a bundled model config** in the harness; if you want to evaluate it, add a `configs/model/qwen25_*.yaml` analogous to `configs/model/qwen3_8b.yaml` and point a study at it.
-
 If you really do want to write your own adapter from scratch, the patch helpers are the entry point:
 
 ```python
