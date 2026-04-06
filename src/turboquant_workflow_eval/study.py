@@ -451,6 +451,7 @@ def write_results(
     prompt_count: int,
     repetitions: int,
     study_config_path: Path | None = None,
+    baseline_policy_name: str | None = None,
 ) -> dict:
     """Write all output artefacts and return the summary dict."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -479,6 +480,7 @@ def write_results(
         "prompt_count": prompt_count,
         "row_count": len(rows),
         "repetitions": repetitions,
+        "baseline_policy_name": baseline_policy_name,
         "verdict_summary": verdict_counts,
         "policies_used": policies_used,
         "output_dir": str(output_dir),
@@ -625,6 +627,15 @@ def run_workflow_study(
     # --- Post-processing ---
     score_results(rows, ctx.thresholds_cfg, baseline_policy_name=ctx.baseline_policy_name)
 
+    # Resolve the effective baseline name for provenance: if the user did not
+    # set one and exactly one policy ran, record that policy's name so the
+    # summary is never ambiguous about what was scored against what.
+    effective_baseline = ctx.baseline_policy_name
+    if effective_baseline is None:
+        unique_policies = {row.get("policy_name") for row in rows if row.get("policy_name")}
+        if len(unique_policies) == 1:
+            effective_baseline = next(iter(unique_policies))
+
     # --- Write final outputs (overwrites incremental JSONL with scored version) ---
     summary = write_results(
         output_dir=ctx.output_dir,
@@ -635,6 +646,7 @@ def run_workflow_study(
         prompt_count=len(ctx.prompt_pack),
         repetitions=ctx.repetitions,
         study_config_path=Path(study_config_path),
+        baseline_policy_name=effective_baseline,
     )
 
     # Final cleanup
