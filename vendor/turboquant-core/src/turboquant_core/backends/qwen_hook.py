@@ -320,10 +320,37 @@ def _patch_attention_forward(attn_module, cache, layer_idx):
         K = K.view(bsz, q_len, num_kv_heads, head_dim).transpose(1, 2)
         V = V.view(bsz, q_len, num_kv_heads, head_dim).transpose(1, 2)
 
-        # Apply rotary embeddings if available
-        if hasattr(attn_module, 'rotary_emb'):
+        # Apply rotary embeddings.
+        #
+        # transformers >=4.45 moved rotary_emb off the per-layer
+        # Qwen2Attention onto the parent Qwen2Model and now precomputes
+        # (cos, sin) once per forward pass, passing it down to every
+        # decoder layer as the `position_embeddings` kwarg. The old
+        # `attn_module.rotary_emb` attribute no longer exists, so the
+        # previous `hasattr(attn_module, 'rotary_emb')` guard silently
+        # skipped RoPE entirely — Q and K were fed into attention with
+        # no positional encoding, producing token-distribution garbage
+        # (random vocab, immediate EOS, repetition) on every prompt.
+        #
+        # Resolution order:
+        #   1. position_embeddings kwarg from the decoder layer (new path)
+        #   2. attn_module.rotary_emb (old transformers <4.45)
+        #   3. parent model's rotary_emb attribute, found via the closure-
+        #      captured `model` reference if available
+        # If none of those produce (cos, sin) we raise — silent skip is
+        # what got us here.
+        position_embeddings = kwargs.get("position_embeddings", None)
+        if position_embeddings is not None:
+            cos, sin = position_embeddings
+        elif hasattr(attn_module, "rotary_emb"):
             cos, sin = attn_module.rotary_emb(V, position_ids)
-            Q, K = _apply_rotary_pos_emb(Q, K, cos, sin)
+        else:
+            raise RuntimeError(
+                "TQ qwen_hook could not locate a rotary embedding source: "
+                "neither position_embeddings kwarg nor attn_module.rotary_emb "
+                "is available. transformers version mismatch?"
+            )
+        Q, K = _apply_rotary_pos_emb(Q, K, cos, sin)
 
         # Store compressed K/V in the TQ cache
         cache.update(K, V, layer_idx)
