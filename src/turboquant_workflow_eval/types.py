@@ -65,10 +65,6 @@ class StudyContext:
         return self.study.runtime
 
     @property
-    def thresholds(self):
-        return self.study.thresholds
-
-    @property
     def policies(self):
         return self.study.policies
 

@@ -16,7 +16,7 @@ import dataclasses
 import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Mapping, TypeVar
+from typing import Any, TypeVar
 
 __all__ = [
     "LayoutConfig",
@@ -26,7 +26,6 @@ __all__ = [
     "AdapterSpec",
     "PolicyConfig",
     "RuntimeConfig",
-    "ThresholdsConfig",
     "OutputsConfig",
     "EarlyStopConfig",
     "StudyConfig",
@@ -255,22 +254,6 @@ class RuntimeConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class ThresholdsConfig:
-    latency_yellow_pct: float | None = None
-    latency_red_pct: float | None = None
-    similarity_yellow: float | None = None
-    similarity_red: float | None = None
-    output_length_yellow_pct: float | None = None
-    output_length_red_pct: float | None = None
-    per_category: Mapping[str, "ThresholdsConfig"] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        # Coerce mutable defaults to immutable forms.
-        if not isinstance(self.per_category, dict):
-            object.__setattr__(self, "per_category", dict(self.per_category))
-
-
-@dataclass(frozen=True, slots=True)
 class OutputsConfig:
     write_individual_text_files: bool = True
     truncate_csv_output_to_chars: int = 180
@@ -285,15 +268,9 @@ class OutputsConfig:
 
 @dataclass(frozen=True, slots=True)
 class EarlyStopConfig:
-    max_red_verdicts: int | None = None
     max_error_rate: float | None = None
 
     def __post_init__(self) -> None:
-        if self.max_red_verdicts is not None and self.max_red_verdicts < 0:
-            raise ConfigValidationError(
-                f"EarlyStopConfig.max_red_verdicts must be >= 0 or None, "
-                f"got {self.max_red_verdicts}"
-            )
         if self.max_error_rate is not None and not (0.0 <= self.max_error_rate <= 1.0):
             raise ConfigValidationError(
                 f"EarlyStopConfig.max_error_rate must be in [0.0, 1.0] or None, "
@@ -314,7 +291,6 @@ class StudyConfig:
     policies: tuple[PolicyConfig, ...]
     runtime: RuntimeConfig
     baseline_policy_name: str | None = None
-    thresholds: ThresholdsConfig = field(default_factory=ThresholdsConfig)
     outputs: OutputsConfig = field(default_factory=OutputsConfig)
     early_stop: EarlyStopConfig = field(default_factory=EarlyStopConfig)
 
