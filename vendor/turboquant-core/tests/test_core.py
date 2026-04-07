@@ -722,6 +722,108 @@ def test_codebook_registry_clear():
 
 
 # ---------------------------------------------------------------------------
+# compressible_heads: TQQuantizedCache runtime per-head masking
+# ---------------------------------------------------------------------------
+
+
+def _cache_ctor_kwargs(**extra):
+    # Qwen3-dense-like layout (all layers compressible, 8 KV heads, hd 128)
+    base = dict(
+        num_layers=4, interval=1,
+        kv_head_dim=128, num_kv_heads=8,
+        bit_width=4, seed=42,
+        residual_window=0, key_strategy="mse",
+    )
+    base.update(extra)
+    return base
+
+
+def test_cache_heads_default_none():
+    """Default construction: per_head_enabled=False, no head_mask in entries."""
+    cache = TQQuantizedCache(**_cache_ctor_kwargs())
+    assert cache.per_head_enabled is False
+    assert cache.head_indices is None
+    K = torch.randn(1, 8, 12, 128)
+    V = torch.randn(1, 8, 12, 128)
+    cache.update(K, V, layer_idx=0)
+    assert "head_mask" not in cache._cache[0]
+
+
+def test_cache_heads_validation_rejects_empty():
+    with pytest.raises(ValueError, match="non-empty"):
+        TQQuantizedCache(**_cache_ctor_kwargs(compressible_heads=[]))
+
+
+def test_cache_heads_validation_rejects_out_of_range():
+    with pytest.raises(ValueError, match="out of range"):
+        TQQuantizedCache(**_cache_ctor_kwargs(compressible_heads=[99]))
+
+
+def test_cache_heads_validation_rejects_duplicates():
+    with pytest.raises(ValueError, match="duplicate"):
+        TQQuantizedCache(**_cache_ctor_kwargs(compressible_heads=[0, 0]))
+
+
+def test_cache_heads_update_stores_mask():
+    """update() on a per-head-enabled cache stores head_mask + k_raw etc."""
+    cache = TQQuantizedCache(**_cache_ctor_kwargs(compressible_heads=[0, 2]))
+    K = torch.randn(1, 8, 16, 128)
+    V = torch.randn(1, 8, 16, 128)
+    cache.update(K, V, layer_idx=0)
+    entry = cache._cache[0]
+    assert entry["head_mask"] == (0, 2)
+    assert entry["head_complement"] == (1, 3, 4, 5, 6, 7)
+    assert entry["full_num_heads"] == 8
+    # k_raw shape: [batch=1, complement=6, sl=16, hd=128]
+    assert tuple(entry["k_raw"].shape) == (1, 6, 16, 128)
+    assert tuple(entry["v_raw"].shape) == (1, 6, 16, 128)
+    # Compressed flat payload should cover only the 2 masked heads.
+    assert entry["num_heads"] == 2
+    assert entry["k_mse"].shape[0] == 1 * 2 * 16
+
+
+def test_cache_heads_compute_attention_shape_and_finite():
+    """compute_attention returns the expected full-head shape with no NaN."""
+    torch.manual_seed(0)
+    cache = TQQuantizedCache(**_cache_ctor_kwargs(compressible_heads=[0, 2]))
+    K = torch.randn(1, 8, 16, 128)
+    V = torch.randn(1, 8, 16, 128)
+    Q = torch.randn(1, 8, 4, 128)
+    cache.update(K, V, layer_idx=0)
+    out = cache.compute_attention(Q, layer_idx=0)
+    assert out.shape == (1, 8, 4, 128)
+    assert not torch.isnan(out).any()
+    assert not torch.isinf(out).any()
+
+
+def test_cache_heads_complement_exact_vs_reference():
+    """Complement heads use raw K/V, so their attention output for a Q that
+    zeroes out the masked heads must equal the reference full-precision
+    attention slice on the complement heads.
+    """
+    torch.manual_seed(1)
+    cache = TQQuantizedCache(**_cache_ctor_kwargs(compressible_heads=[0, 2]))
+    K = torch.randn(1, 8, 16, 128)
+    V = torch.randn(1, 8, 16, 128)
+    Q = torch.randn(1, 8, 4, 128)
+
+    cache.update(K, V, layer_idx=0)
+    out = cache.compute_attention(Q, layer_idx=0)
+
+    # Reference: run full-precision attention on complement heads only.
+    complement = [1, 3, 4, 5, 6, 7]
+    K_c = K[:, complement]
+    V_c = V[:, complement]
+    Q_c = Q[:, complement]
+    hd = K.shape[-1]
+    scores = Q_c @ K_c.transpose(-2, -1) / (hd ** 0.5)
+    ref = torch.softmax(scores, dim=-1) @ V_c
+    # Complement heads in `out` must match the reference exactly — they
+    # never went through quantization.
+    assert torch.allclose(out[:, complement], ref, atol=1e-5)
+
+
+# ---------------------------------------------------------------------------
 # compressible_heads: backend-class per-head masking
 # ---------------------------------------------------------------------------
 
@@ -850,7 +952,15 @@ if __name__ == "__main__":
         test_qjl_inner_product_unbiasedness,
         test_adapter_interface_contract,
         test_bit_width_kv_asymmetry_semantics,
-        # compressible_heads tests
+        # TQQuantizedCache per-head runtime tests
+        test_cache_heads_default_none,
+        test_cache_heads_validation_rejects_empty,
+        test_cache_heads_validation_rejects_out_of_range,
+        test_cache_heads_validation_rejects_duplicates,
+        test_cache_heads_update_stores_mask,
+        test_cache_heads_compute_attention_shape_and_finite,
+        test_cache_heads_complement_exact_vs_reference,
+        # compressible_heads backend-class tests
         test_compressible_heads_default_none,
         test_compressible_heads_subset_shape,
         test_compressible_heads_subset_roundtrip,

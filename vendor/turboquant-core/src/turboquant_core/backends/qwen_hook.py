@@ -46,7 +46,8 @@ def patch_qwen35_with_tq(model, bit_width=4, seed=42, device=None, *,
                          num_layers=32, full_attn_interval=4,
                          kv_heads=4, head_dim=256, residual_window=0,
                          key_strategy="mse+qjl", value_strategy="mse",
-                         compressible_layers=None):
+                         compressible_layers=None,
+                         compressible_heads=None):
     """Patch a Qwen3.5 model to use TurboQuant compressed KV cache.
 
     Args:
@@ -89,6 +90,7 @@ def patch_qwen35_with_tq(model, bit_width=4, seed=42, device=None, *,
         key_strategy=key_strategy,
         value_strategy=value_strategy,
         compressible_layers=sorted(resolved),
+        compressible_heads=compressible_heads,
     )
 
     # Find the attention layers in the model
@@ -117,7 +119,8 @@ def patch_qwen3_with_tq(model, bit_width=4, seed=42, device=None, *,
                         num_layers=36, kv_heads=8, head_dim=128,
                         residual_window=0, key_strategy="mse+qjl",
                         value_strategy="mse",
-                        compressible_layers=None):
+                        compressible_layers=None,
+                        compressible_heads=None):
     """Patch a Qwen3-8B model to use TurboQuant compressed KV cache.
 
     All layers are dense attention and compressible.
@@ -154,6 +157,7 @@ def patch_qwen3_with_tq(model, bit_width=4, seed=42, device=None, *,
         key_strategy=key_strategy,
         value_strategy=value_strategy,
         compressible_layers=sorted(resolved),
+        compressible_heads=compressible_heads,
     )
 
     layers = _get_model_layers(model)
@@ -177,7 +181,8 @@ def patch_qwen25_with_tq(model, bit_width=4, seed=42, device=None, *,
                          num_layers=36, kv_heads=2, head_dim=128,
                          residual_window=0, key_strategy="mse+qjl",
                          value_strategy="mse",
-                         compressible_layers=None):
+                         compressible_layers=None,
+                         compressible_heads=None):
     """Patch a Qwen2.5 model to use TurboQuant compressed KV cache.
 
     Qwen2.5-3B-Instruct: 36 dense attention layers, 2 KV heads, head_dim 128.
@@ -218,6 +223,7 @@ def patch_qwen25_with_tq(model, bit_width=4, seed=42, device=None, *,
         key_strategy=key_strategy,
         value_strategy=value_strategy,
         compressible_layers=sorted(resolved),
+        compressible_heads=compressible_heads,
     )
 
     layers = _get_model_layers(model)
@@ -423,16 +429,25 @@ def _gqa_attention(Q, cache, layer_idx, num_q_heads, num_kv_heads,
     compressed_len = cache._compressed_seq_len(layer_idx)
     c_shape = (bsz, num_kv_heads, compressed_len, head_dim)
 
-    # MSE-reconstructed K from compressed cache
-    K_mse = tq_dequantize_mse(
-        entry["k_mse"], entry["k_n"], cache.k_cb, cache.k_rot
-    ).reshape(c_shape)
+    per_head_enabled = "head_mask" in entry
+
+    if per_head_enabled:
+        # Per-head masking: reconstruct full-head K/V (MSE-dequantized
+        # for masked heads, raw for complement heads). The downstream
+        # GQA expansion + softmax runs unchanged on the full-head
+        # tensor. QJL bias correction is skipped deliberately on this
+        # path — see TQQuantizedCache._reconstruct_full_kv.
+        K_mse, V_compressed = cache._reconstruct_full_kv(entry)
+    else:
+        K_mse = tq_dequantize_mse(
+            entry["k_mse"], entry["k_n"], cache.k_cb, cache.k_rot
+        ).reshape(c_shape)
     K_mse_expanded = _expand_kv_for_gqa(
         K_mse, num_kv_heads, num_groups, bsz, compressed_len, head_dim,
     )
     scores_mse = Q @ K_mse_expanded.transpose(-2, -1)
 
-    if cache.key_strategy == "mse+qjl":
+    if cache.key_strategy == "mse+qjl" and not per_head_enabled:
         # QJL correction at KV head granularity, then expand
         k_qjl_all = entry["k_qjl"].reshape(bsz, num_kv_heads, compressed_len, head_dim)
         k_rn_all = entry["k_rn"].reshape(bsz, num_kv_heads, compressed_len)
@@ -462,10 +477,11 @@ def _gqa_attention(Q, cache, layer_idx, num_q_heads, num_kv_heads,
     else:
         compressed_scores = scores_mse / (head_dim ** 0.5)
 
-    # Decompress V from compressed region
-    V_compressed = tq_dequantize_mse(
-        entry["v_idx"], entry["v_n"], cache.v_cb, cache.v_rot
-    ).reshape(c_shape)
+    # Decompress V from compressed region (per-head path already has it)
+    if not per_head_enabled:
+        V_compressed = tq_dequantize_mse(
+            entry["v_idx"], entry["v_n"], cache.v_cb, cache.v_rot
+        ).reshape(c_shape)
     V_compressed_expanded = _expand_kv_for_gqa(
         V_compressed, num_kv_heads, num_groups, bsz, compressed_len, head_dim,
     )

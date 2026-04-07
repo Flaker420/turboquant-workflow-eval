@@ -7,6 +7,9 @@ from turboquant_workflow_eval.import_utils import load_object
 
 class TestLoadObject:
     def test_valid_adapter(self) -> None:
+        # Loading the adapter transitively imports turboquant_core, which
+        # imports torch. Skip when torch is unavailable (sandbox).
+        pytest.importorskip("torch")
         cls = load_object("turboquant_workflow_eval.adapters.none:NoCompressionAdapter")
         assert cls.__name__ == "NoCompressionAdapter"
 

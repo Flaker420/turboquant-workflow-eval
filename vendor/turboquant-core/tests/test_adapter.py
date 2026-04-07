@@ -213,6 +213,8 @@ class TestTurboQuantAdapter:
             "residual_window": 8,
             "key_strategy": "mse",
             "value_strategy": "mse",
+            "compressible_layers": None,
+            "compressible_heads": None,
         }
 
     def test_describe_defaults(self):
@@ -225,6 +227,8 @@ class TestTurboQuantAdapter:
             "residual_window": 0,
             "key_strategy": "mse+qjl",
             "value_strategy": "mse",
+            "compressible_layers": None,
+            "compressible_heads": None,
         }
 
     def test_cleanup(self):

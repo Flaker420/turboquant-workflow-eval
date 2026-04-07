@@ -79,14 +79,7 @@ class TurboQuantAdapter:
             compressible_layers = list(compressible_layers)
         compressible_heads = settings.get("compressible_heads")
         if compressible_heads is not None:
-            raise NotImplementedError(
-                "compressible_heads is supported at the Qwen*KVBackend "
-                "class level (see vendor/turboquant-core/tests/test_core.py "
-                "test_compressible_heads_*), but runtime integration through "
-                "TQQuantizedCache + qwen_hook is not yet wired. Unset this "
-                "field, or construct a Qwen*KVBackend directly for offline "
-                "studies."
-            )
+            compressible_heads = list(compressible_heads)
 
         self._bit_width = bit_width
         self._seed = seed
@@ -104,6 +97,7 @@ class TurboQuantAdapter:
             key_strategy=key_strategy,
             value_strategy=value_strategy,
             compressible_layers=compressible_layers,
+            compressible_heads=compressible_heads,
             **layout,
         )
 
