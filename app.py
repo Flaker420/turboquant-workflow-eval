@@ -491,6 +491,7 @@ _study_controller = None
 def run_study_ui(study_config_path, policy_paths, output_dir,
                  repetitions, temperature, max_new_tokens, shuffle_policies,
                  compressible_layers_text,
+                 compressible_heads_text,
                  model_config_override,
                  prompt_category_filter, prompt_id_filter,
                  policy_overrides_text="",
@@ -557,6 +558,19 @@ def run_study_ui(study_config_path, policy_paths, output_dir,
             return f"Invalid compressible_layers {cl_text!r}: {exc}", None, ""
         new_pols = tuple(
             replace(p, settings=replace(p.settings, compressible_layers=cl))
+            for p in study.policies
+        )
+        study = replace(study, policies=new_pols)
+
+    # 4b. Global compressible_heads textbox — applies to every policy.
+    ch_text = (compressible_heads_text or "").strip()
+    if ch_text:
+        try:
+            ch = parse_int_list(ch_text)
+        except Exception as exc:
+            return f"Invalid compressible_heads {ch_text!r}: {exc}", None, ""
+        new_pols = tuple(
+            replace(p, settings=replace(p.settings, compressible_heads=ch))
             for p in study.policies
         )
         study = replace(study, policies=new_pols)
@@ -706,6 +720,16 @@ def build_study_tab():
                     "Overrides accordion below."
                 ),
             )
+            compressible_heads_box = gr.Textbox(
+                label="Compressible heads",
+                placeholder="e.g. 0,2 (blank = all heads)",
+                info=(
+                    "Comma-separated KV-head indices applied to every policy's "
+                    "PolicySettings.compressible_heads. Blank compresses every "
+                    "head. Heads are validated per-backend against num_kv_heads "
+                    "at prepare_model time."
+                ),
+            )
 
         with gr.Accordion("Policy Overrides", open=False):
             gr.Markdown(
@@ -780,6 +804,7 @@ def build_study_tab():
             inputs=[study_dd, policy_cb, output_dir,
                     repetitions, temperature, max_new_tokens, shuffle_policies,
                     compressible_layers_box,
+                    compressible_heads_box,
                     model_override_dd,
                     prompt_category_filter, prompt_id_filter,
                     policy_overrides_box],
