@@ -366,7 +366,7 @@ The `python -m turboquant_workflow_eval` entry point (and `scripts/run_workflow_
 | `--policies POLICIES` | str | — | Comma-separated list of policy module paths that overrides study.policies. |
 | `--single` | flag | False | Quick smoke test: first matching prompt, first enabled policy, 1 repetition |
 | `--dry-run` | flag | False | Validate all configs and print execution plan without touching the GPU |
-| `--rescore ROWS_JSONL` | str | — | Re-score existing results with new thresholds (no GPU). Use --set for threshold overrides. |
+| `--rescore ROWS_JSONL` | str | — | Recompute divergence + KV-cache compression metrics over an existing rows.jsonl (no GPU; requires output_token_ids in the file). |
 | `--prompt-id PROMPT-IDS` | str (repeatable) | — | Run only the specified prompt ID (repeatable) |
 | `--prompt-category PROMPT-CATEGORIES` | str (repeatable) | — | Run only prompts in the specified category (repeatable) |
 | `--prompt-filter REGEX` | str | — | Filter prompts by regex on id/title |
@@ -413,22 +413,10 @@ The `python -m turboquant_workflow_eval` entry point (and `scripts/run_workflow_
 | `--shuffle-seed SHUFFLE-SEED` | int | — | Override runtime.shuffle_seed. |
 | `--baseline-policy BASELINE-POLICY` | str | — | Override study.baseline_policy_name. |
 
-### thresholds
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--latency-yellow-pct LATENCY-YELLOW-PCT` | float | — | Override thresholds.latency_yellow_pct. |
-| `--latency-red-pct LATENCY-RED-PCT` | float | — | Override thresholds.latency_red_pct. |
-| `--similarity-yellow SIMILARITY-YELLOW` | float | — | Override thresholds.similarity_yellow. |
-| `--similarity-red SIMILARITY-RED` | float | — | Override thresholds.similarity_red. |
-| `--output-length-yellow-pct OUTPUT-LENGTH-YELLOW-PCT` | float | — | Override thresholds.output_length_yellow_pct. |
-| `--output-length-red-pct OUTPUT-LENGTH-RED-PCT` | float | — | Override thresholds.output_length_red_pct. |
-
 ### early stop
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--max-red-verdicts MAX-RED-VERDICTS` | int | — | Override early_stop.max_red_verdicts. |
 | `--max-error-rate MAX-ERROR-RATE` | float | — | Override early_stop.max_error_rate. |
 <!-- cli-docs:end -->
 
