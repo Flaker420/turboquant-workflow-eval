@@ -348,6 +348,55 @@ class TQGatedAttnKVCache:
         return scores_mse + correction
 
 
+def _resolve_head_indices(user_value, num_kv_heads):
+    """Validate a ``compressible_heads`` list and return
+    ``(frozenset | None, sorted_mask_tuple, complement_tuple)``.
+
+    ``None`` means "compress every head" — returns ``(None, (), ())``.
+    Any provided value must be a non-empty, duplicate-free list of ints
+    in ``[0, num_kv_heads)``.
+    """
+    if user_value is None:
+        return None, (), ()
+    seen = set()
+    duplicates = []
+    bad_type = []
+    bad_range = []
+    for idx in user_value:
+        if isinstance(idx, bool) or not isinstance(idx, int):
+            bad_type.append(idx)
+            continue
+        if idx < 0 or idx >= num_kv_heads:
+            bad_range.append(idx)
+            continue
+        if idx in seen:
+            duplicates.append(idx)
+            continue
+        seen.add(idx)
+    if bad_type:
+        raise ValueError(
+            "TQQuantizedCache.compressible_heads must contain ints; "
+            f"got non-int entries {bad_type!r}."
+        )
+    if bad_range:
+        raise ValueError(
+            f"TQQuantizedCache.compressible_heads indices {sorted(set(bad_range))} "
+            f"are out of range [0, {num_kv_heads})."
+        )
+    if duplicates:
+        raise ValueError(
+            "TQQuantizedCache.compressible_heads contains duplicate "
+            f"indices {sorted(set(duplicates))}."
+        )
+    if not seen:
+        raise ValueError(
+            "TQQuantizedCache.compressible_heads must be non-empty when provided."
+        )
+    mask = tuple(sorted(seen))
+    complement = tuple(h for h in range(num_kv_heads) if h not in seen)
+    return frozenset(seen), mask, complement
+
+
 # ---------------------------------------------------------------------------
 # TQQuantizedCache — compressed KV storage with corrected attention
 # ---------------------------------------------------------------------------
@@ -375,7 +424,8 @@ class TQQuantizedCache:
                  bit_width=4, seed=42, device=torch.device("cpu"),
                  residual_window=0, key_strategy="mse+qjl",
                  value_strategy="mse",
-                 compressible_layers=None):
+                 compressible_layers=None,
+                 compressible_heads=None):
         self.num_layers = num_layers
         default_ga = {i for i in range(num_layers) if (i + 1) % interval == 0}
         if compressible_layers is None:
@@ -409,6 +459,12 @@ class TQQuantizedCache:
                 )
             self.ga_indices = indices
         self.compressible_layers = sorted(self.ga_indices)
+        self.head_indices, self._head_mask, self._head_complement = \
+            _resolve_head_indices(compressible_heads, num_kv_heads)
+        self.per_head_enabled = self.head_indices is not None
+        self.compressible_heads = (
+            list(self._head_mask) if self.per_head_enabled else None
+        )
         self.kv_head_dim = kv_head_dim
         self.num_kv_heads = num_kv_heads
         self.device = device
@@ -473,14 +529,74 @@ class TQQuantizedCache:
             }
 
     def _merge_compressed(self, old, new):
-        """Concatenate two compressed cache entries."""
+        """Concatenate two compressed cache entries.
+
+        Flat quantized tensors (k_mse, k_qjl, k_rn, k_n, v_idx, v_n) are
+        concatenated along dim 0 (the flattened ``b*nh*sl`` axis).
+        Per-head passthrough buffers (``k_raw``/``v_raw``) are 4-D
+        ``[b, len(complement), sl, hd]`` tensors and must concatenate on
+        the sequence axis (dim 2) instead. Scalar metadata and the head
+        mask tuples carry through unchanged; head_mask / head_complement /
+        full_num_heads are asserted to match between old and new.
+        """
+        _RAW_KEYS = {"k_raw", "v_raw"}
+        _MASK_KEYS = {"head_mask", "head_complement", "full_num_heads"}
         merged = {}
         for key in old:
-            if isinstance(old[key], torch.Tensor):
-                merged[key] = torch.cat([old[key], new[key]], dim=0)
+            old_v = old[key]
+            new_v = new.get(key, old_v)
+            if key in _RAW_KEYS and isinstance(old_v, torch.Tensor):
+                merged[key] = torch.cat([old_v, new_v], dim=2)
+            elif isinstance(old_v, torch.Tensor):
+                merged[key] = torch.cat([old_v, new_v], dim=0)
+            elif key in _MASK_KEYS:
+                if old_v != new_v:
+                    raise ValueError(
+                        f"TQQuantizedCache._merge_compressed: {key} drift "
+                        f"(old={old_v!r}, new={new_v!r})"
+                    )
+                merged[key] = old_v
             else:
-                merged[key] = new[key]
+                merged[key] = new_v
         return merged
+
+    def _compress_slice(self, K_slice, V_slice):
+        """Compress a 4-D K/V slice ``[b, nh, sl, hd]`` and attach head-mask
+        metadata if ``self.per_head_enabled``. Returns an entry dict.
+
+        When per-head masking is active, only the ``self._head_mask`` heads
+        go through the MSE/QJL quantizer; the complement heads ride along
+        in full precision via ``k_raw``/``v_raw``.
+        """
+        b, nh, sl, hd = K_slice.shape
+        if not self.per_head_enabled:
+            Kf = K_slice.reshape(b * nh * sl, hd)
+            Vf = V_slice.reshape(b * nh * sl, hd)
+            return self._compress_kv(Kf, Vf, b, nh, hd)
+
+        mask_idx = torch.tensor(self._head_mask, device=K_slice.device, dtype=torch.long)
+        K_mask = K_slice.index_select(1, mask_idx).contiguous()
+        V_mask = V_slice.index_select(1, mask_idx).contiguous()
+        if self._head_complement:
+            compl_idx = torch.tensor(
+                self._head_complement, device=K_slice.device, dtype=torch.long
+            )
+            K_raw = K_slice.index_select(1, compl_idx).contiguous()
+            V_raw = V_slice.index_select(1, compl_idx).contiguous()
+        else:
+            K_raw = K_slice.new_zeros(b, 0, sl, hd)
+            V_raw = V_slice.new_zeros(b, 0, sl, hd)
+
+        m = len(self._head_mask)
+        Kf = K_mask.reshape(b * m * sl, hd)
+        Vf = V_mask.reshape(b * m * sl, hd)
+        entry = self._compress_kv(Kf, Vf, b, m, hd)
+        entry["head_mask"] = self._head_mask
+        entry["head_complement"] = self._head_complement
+        entry["full_num_heads"] = nh
+        entry["k_raw"] = K_raw
+        entry["v_raw"] = V_raw
+        return entry
 
     def update(self, K, V, layer_idx):
         """Store K/V for a layer. Compresses GatedAttn layers, stores raw otherwise.
@@ -525,11 +641,7 @@ class TQQuantizedCache:
             self._window_k[layer_idx] = window_k[:, :, overflow_len:, :]
             self._window_v[layer_idx] = window_v[:, :, overflow_len:, :]
 
-            oc_b, oc_nh, oc_sl, oc_hd = to_compress_k.shape
-            Kf = to_compress_k.reshape(oc_b * oc_nh * oc_sl, oc_hd)
-            Vf = to_compress_v.reshape(oc_b * oc_nh * oc_sl, oc_hd)
-
-            new_entry = self._compress_kv(Kf, Vf, oc_b, oc_nh, oc_hd)
+            new_entry = self._compress_slice(to_compress_k, to_compress_v)
 
             if self._cache[layer_idx] is None:
                 self._cache[layer_idx] = new_entry
@@ -551,10 +663,7 @@ class TQQuantizedCache:
             self._window_k[layer_idx] = None
             self._window_v[layer_idx] = None
 
-            Kf = K.reshape(b * nh * sl, hd)
-            Vf = V.reshape(b * nh * sl, hd)
-
-            new_entry = self._compress_kv(Kf, Vf, b, nh, hd)
+            new_entry = self._compress_slice(K, V)
 
             if self._cache[layer_idx] is None:
                 self._cache[layer_idx] = new_entry
@@ -571,9 +680,43 @@ class TQQuantizedCache:
         if entry is None:
             return 0
         b = entry["batch"]
-        nh = entry["num_heads"]
+        nh = entry["num_heads"]  # masked head count when per-head is active
         total_flat = entry["k_mse"].shape[0]
         return total_flat // (b * nh)
+
+    def _reconstruct_full_kv(self, entry):
+        """Reassemble full-head K/V tensors from a compressed entry when
+        per-head masking was applied. Returns ``(K_full, V_full)`` of shape
+        ``[b, full_num_heads, compressed_len, head_dim]``.
+
+        Masked heads come from the MSE-dequantized quantizer output;
+        complement heads come from the raw passthrough buffers. QJL bias
+        correction is deliberately skipped on this path — see the module
+        docstring.
+        """
+        b = entry["batch"]
+        m = entry["num_heads"]
+        hd = entry["head_dim"]
+        nh_full = entry["full_num_heads"]
+        compressed_len = entry["k_mse"].shape[0] // (b * m)
+        mask = list(entry["head_mask"])
+        complement = list(entry["head_complement"])
+
+        K_mse = tq_dequantize_mse(
+            entry["k_mse"], entry["k_n"], self.k_cb, self.k_rot,
+        ).reshape(b, m, compressed_len, hd)
+        V_comp = tq_dequantize_mse(
+            entry["v_idx"], entry["v_n"], self.v_cb, self.v_rot,
+        ).reshape(b, m, compressed_len, hd)
+
+        K_full = K_mse.new_empty(b, nh_full, compressed_len, hd)
+        V_full = V_comp.new_empty(b, nh_full, compressed_len, hd)
+        K_full[:, mask, :, :] = K_mse
+        V_full[:, mask, :, :] = V_comp
+        if complement:
+            K_full[:, complement, :, :] = entry["k_raw"]
+            V_full[:, complement, :, :] = entry["v_raw"]
+        return K_full, V_full
 
     def get_seq_length(self, layer_idx=0):
         return self._seq_lens[layer_idx]
@@ -630,37 +773,48 @@ class TQQuantizedCache:
             return attn @ wv
 
         # --- Compressed path (possibly with residual window) ---
-        b = entry["batch"]
-        nh = entry["num_heads"]
         compressed_len = self._compressed_seq_len(layer_idx)
-        c_shape = (b, nh, compressed_len, hd)
 
-        # MSE-reconstructed K
-        K_mse = tq_dequantize_mse(
-            entry["k_mse"], entry["k_n"], self.k_cb, self.k_rot
-        ).reshape(c_shape)
-        scores_mse = Q @ K_mse.transpose(-2, -1)
-
-        # QJL bias correction (only if key_strategy == "mse+qjl")
-        if self.key_strategy == "mse+qjl":
-            Q_flat = Q.reshape(b * nh * q_len, hd)
-            Q_qjl = self.k_qjl.quantize(Q_flat).reshape(b * nh, q_len, hd)
-            k_qjl = entry["k_qjl"].reshape(b * nh, compressed_len, hd)
-
-            correction = Q_qjl.float() @ k_qjl.float().transpose(-2, -1)
-            correction = correction * (math.pi / (2 * hd))
-            correction = correction * entry["k_rn"].reshape(b * nh, 1, compressed_len)
-            correction = correction * entry["k_n"].reshape(b * nh, 1, compressed_len)
-            correction = correction.reshape(b, nh, q_len, compressed_len)
-
-            compressed_scores = (scores_mse + correction) / (hd ** 0.5)
-        else:
+        if "head_mask" in entry:
+            # Per-head masking: reconstruct full-head K/V (MSE-dequantized
+            # for the masked heads, raw for the complement) and run the
+            # unmodified attention formula. QJL bias correction is skipped
+            # on this path — research use case is head ablation, not
+            # maximal numerical fidelity.
+            K_full, V_compressed = self._reconstruct_full_kv(entry)
+            scores_mse = Q @ K_full.transpose(-2, -1)
             compressed_scores = scores_mse / (hd ** 0.5)
+        else:
+            b = entry["batch"]
+            nh = entry["num_heads"]
+            c_shape = (b, nh, compressed_len, hd)
 
-        # Decompress V from compressed region
-        V_compressed = tq_dequantize_mse(
-            entry["v_idx"], entry["v_n"], self.v_cb, self.v_rot
-        ).reshape(c_shape)
+            # MSE-reconstructed K
+            K_mse = tq_dequantize_mse(
+                entry["k_mse"], entry["k_n"], self.k_cb, self.k_rot
+            ).reshape(c_shape)
+            scores_mse = Q @ K_mse.transpose(-2, -1)
+
+            # QJL bias correction (only if key_strategy == "mse+qjl")
+            if self.key_strategy == "mse+qjl":
+                Q_flat = Q.reshape(b * nh * q_len, hd)
+                Q_qjl = self.k_qjl.quantize(Q_flat).reshape(b * nh, q_len, hd)
+                k_qjl = entry["k_qjl"].reshape(b * nh, compressed_len, hd)
+
+                correction = Q_qjl.float() @ k_qjl.float().transpose(-2, -1)
+                correction = correction * (math.pi / (2 * hd))
+                correction = correction * entry["k_rn"].reshape(b * nh, 1, compressed_len)
+                correction = correction * entry["k_n"].reshape(b * nh, 1, compressed_len)
+                correction = correction.reshape(b, nh, q_len, compressed_len)
+
+                compressed_scores = (scores_mse + correction) / (hd ** 0.5)
+            else:
+                compressed_scores = scores_mse / (hd ** 0.5)
+
+            # Decompress V from compressed region
+            V_compressed = tq_dequantize_mse(
+                entry["v_idx"], entry["v_n"], self.v_cb, self.v_rot
+            ).reshape(c_shape)
 
         if has_window:
             # Combine compressed scores with FP16 window scores

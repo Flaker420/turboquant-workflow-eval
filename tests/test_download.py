@@ -10,22 +10,34 @@ from turboquant_workflow_eval.download import (
 
 
 def test_discover_model_configs(tmp_path: Path) -> None:
+    # Post-PR#35: configs are Python modules exposing a top-level
+    # ``MODEL = ModelConfig(...)`` rather than YAML.
     model_dir = tmp_path / "model"
     model_dir.mkdir()
-    (model_dir / "alpha.yaml").write_text(
-        "model_name: org/alpha\nlanguage_model_only: false\n", encoding="utf-8"
+    (model_dir / "alpha.py").write_text(
+        "from turboquant_workflow_eval.schema import ModelConfig\n"
+        "MODEL = ModelConfig(model_name='org/alpha', dtype='bf16',\n"
+        "                    language_model_only=False)\n",
+        encoding="utf-8",
     )
-    (model_dir / "beta.yaml").write_text(
-        "model_name: org/beta\nlanguage_model_only: true\n", encoding="utf-8"
+    (model_dir / "beta.py").write_text(
+        "from turboquant_workflow_eval.schema import ModelConfig\n"
+        "MODEL = ModelConfig(model_name='org/beta', dtype='bf16',\n"
+        "                    language_model_only=True)\n",
+        encoding="utf-8",
     )
-    # Non-yaml files should be ignored
+    # Non-Python files and underscore-prefixed modules must be ignored.
     (model_dir / "readme.txt").write_text("ignore me", encoding="utf-8")
+    (model_dir / "_private.py").write_text(
+        "from turboquant_workflow_eval.schema import ModelConfig\n"
+        "MODEL = ModelConfig(model_name='org/private', dtype='bf16')\n",
+        encoding="utf-8",
+    )
 
     configs = discover_model_configs(model_dir)
-    assert len(configs) == 2
-    assert configs[0]["model_name"] == "org/alpha"
-    assert configs[1]["model_name"] == "org/beta"
-    assert "_config_path" in configs[0]
+    names = sorted(c["model_name"] for c in configs)
+    assert names == ["org/alpha", "org/beta"]
+    assert all("_config_path" in c for c in configs)
 
 
 def test_discover_model_configs_empty(tmp_path: Path) -> None:
