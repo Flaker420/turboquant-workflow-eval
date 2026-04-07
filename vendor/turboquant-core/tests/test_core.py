@@ -1,6 +1,7 @@
 """Comprehensive tests for TurboQuant core algorithms and backends."""
 
 import math
+import pytest
 import torch
 import numpy as np
 
@@ -720,6 +721,91 @@ def test_codebook_registry_clear():
     CodebookRegistry.get(256, 4)
 
 
+# ---------------------------------------------------------------------------
+# compressible_heads: backend-class per-head masking
+# ---------------------------------------------------------------------------
+
+
+def test_compressible_heads_default_none():
+    """compressible_heads=None → legacy compress() dict, no head_mask key."""
+    backend = Qwen3DenseKVBackend()
+    K = torch.randn(1, 8, 16, 128)
+    V = torch.randn(1, 8, 16, 128)
+    compressed = backend.compress(K, V, layer_idx=0)
+    assert "head_mask" not in compressed
+    assert backend.head_indices is None
+    assert backend.compressible_heads is None
+    V_out = backend.decompress_v(compressed)
+    assert V_out.shape == V.shape
+
+
+def test_compressible_heads_subset_shape():
+    """Subset mask records mask/complement and reconstructs full V shape."""
+    backend = Qwen3DenseKVBackend(compressible_heads=[0, 2])
+    K = torch.randn(1, 8, 16, 128)
+    V = torch.randn(1, 8, 16, 128)
+    compressed = backend.compress(K, V, layer_idx=0)
+    assert compressed["head_mask"] == (0, 2)
+    assert compressed["head_complement"] == (1, 3, 4, 5, 6, 7)
+    assert compressed["full_shape"] == V.shape
+    assert backend.compressible_heads == [0, 2]
+    V_out = backend.decompress_v(compressed)
+    assert V_out.shape == V.shape
+
+
+def test_compressible_heads_subset_roundtrip():
+    """Complement heads are bit-identical after round-trip; masked heads are close."""
+    backend = Qwen3DenseKVBackend(compressible_heads=[0, 2], key_strategy="mse")
+    torch.manual_seed(0)
+    K = torch.randn(1, 8, 16, 128)
+    V = torch.randn(1, 8, 16, 128)
+    compressed = backend.compress(K, V, layer_idx=0)
+    V_out = backend.decompress_v(compressed)
+    # Complement heads stored raw → exact equality.
+    complement = [1, 3, 4, 5, 6, 7]
+    assert torch.equal(V_out[:, complement, :, :], V[:, complement, :, :])
+    # Masked heads went through MSE quantization — not exact, but finite.
+    assert not torch.isnan(V_out).any()
+    assert not torch.isinf(V_out).any()
+
+
+def test_compressible_heads_attention_scores_mixed():
+    """compute_attention_scores for masked path scatters mask + complement back."""
+    backend = Qwen3DenseKVBackend(compressible_heads=[0, 2], key_strategy="mse")
+    torch.manual_seed(1)
+    K = torch.randn(1, 8, 16, 128)
+    V = torch.randn(1, 8, 16, 128)
+    Q = torch.randn(1, 8, 4, 128)
+    compressed = backend.compress(K, V, layer_idx=0)
+    scores = backend.compute_attention_scores(Q, compressed)
+    assert scores.shape == (1, 8, 4, 16)
+    # Complement-head rows must equal direct Q @ K^T (they're stored raw).
+    complement = [1, 3, 4, 5, 6, 7]
+    direct = Q[:, complement, :, :] @ K[:, complement, :, :].transpose(-2, -1)
+    assert torch.allclose(scores[:, complement, :, :], direct, atol=1e-5)
+    # Masked-head rows should be finite and NOT identical to direct QK^T
+    # (they went through MSE quantization).
+    masked_direct = Q[:, [0, 2], :, :] @ K[:, [0, 2], :, :].transpose(-2, -1)
+    masked_recon = scores[:, [0, 2], :, :]
+    assert not torch.isnan(masked_recon).any()
+    assert not torch.equal(masked_recon, masked_direct)
+
+
+def test_compressible_heads_rejects_out_of_range():
+    with pytest.raises(ValueError, match="out of range"):
+        Qwen3DenseKVBackend(compressible_heads=[99])
+
+
+def test_compressible_heads_rejects_empty():
+    with pytest.raises(ValueError, match="non-empty"):
+        Qwen3DenseKVBackend(compressible_heads=[])
+
+
+def test_compressible_heads_rejects_duplicates():
+    with pytest.raises(ValueError, match="duplicate"):
+        Qwen3DenseKVBackend(compressible_heads=[0, 0, 1])
+
+
 # Main
 # ---------------------------------------------------------------------------
 
@@ -764,6 +850,14 @@ if __name__ == "__main__":
         test_qjl_inner_product_unbiasedness,
         test_adapter_interface_contract,
         test_bit_width_kv_asymmetry_semantics,
+        # compressible_heads tests
+        test_compressible_heads_default_none,
+        test_compressible_heads_subset_shape,
+        test_compressible_heads_subset_roundtrip,
+        test_compressible_heads_attention_scores_mixed,
+        test_compressible_heads_rejects_out_of_range,
+        test_compressible_heads_rejects_empty,
+        test_compressible_heads_rejects_duplicates,
     ]
 
     print(f"Running {len(tests)} tests...\n")

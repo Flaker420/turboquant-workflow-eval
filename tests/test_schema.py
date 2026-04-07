@@ -130,6 +130,25 @@ class TestPolicySettings:
         with pytest.raises(ConfigValidationError, match="ints"):
             PolicySettings(compressible_layers=("3", 7))  # type: ignore[arg-type]
 
+    def test_compressible_heads_default_none(self) -> None:
+        assert PolicySettings().compressible_heads is None
+
+    def test_compressible_heads_coerced_to_tuple(self) -> None:
+        s = PolicySettings(compressible_heads=[0, 2])
+        assert s.compressible_heads == (0, 2)
+
+    def test_compressible_heads_negative_rejected(self) -> None:
+        with pytest.raises(ConfigValidationError, match=">= 0"):
+            PolicySettings(compressible_heads=(-1, 0))
+
+    def test_compressible_heads_duplicate_rejected(self) -> None:
+        with pytest.raises(ConfigValidationError, match="duplicate"):
+            PolicySettings(compressible_heads=(0, 2, 0))
+
+    def test_compressible_heads_empty_rejected(self) -> None:
+        with pytest.raises(ConfigValidationError, match="non-empty"):
+            PolicySettings(compressible_heads=())
+
 
 # ---------------------------------------------------------------------------
 # RuntimeConfig

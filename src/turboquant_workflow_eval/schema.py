@@ -134,6 +134,7 @@ class PolicySettings:
     profile: str | None = None
     model_variant: str | None = None
     compressible_layers: tuple[int, ...] | None = None
+    compressible_heads: tuple[int, ...] | None = None
 
     def __post_init__(self) -> None:
         if self.bit_width < 1:
@@ -154,32 +155,31 @@ class PolicySettings:
             raise ConfigValidationError(
                 f"PolicySettings.residual_window must be >= 0, got {self.residual_window}"
             )
-        if self.compressible_layers is not None:
-            if not isinstance(self.compressible_layers, tuple):
-                object.__setattr__(
-                    self, "compressible_layers", tuple(self.compressible_layers)
-                )
-            seen = set()
-            for idx in self.compressible_layers:
+        for field_name in ("compressible_layers", "compressible_heads"):
+            value = getattr(self, field_name)
+            if value is None:
+                continue
+            if not isinstance(value, tuple):
+                value = tuple(value)
+                object.__setattr__(self, field_name, value)
+            seen: set[int] = set()
+            for idx in value:
                 if isinstance(idx, bool) or not isinstance(idx, int):
                     raise ConfigValidationError(
-                        "PolicySettings.compressible_layers must contain ints, "
-                        f"got {idx!r}"
+                        f"PolicySettings.{field_name} must contain ints, got {idx!r}"
                     )
                 if idx < 0:
                     raise ConfigValidationError(
-                        "PolicySettings.compressible_layers indices must be >= 0, "
-                        f"got {idx}"
+                        f"PolicySettings.{field_name} indices must be >= 0, got {idx}"
                     )
                 if idx in seen:
                     raise ConfigValidationError(
-                        "PolicySettings.compressible_layers contains duplicate "
-                        f"index {idx}"
+                        f"PolicySettings.{field_name} contains duplicate index {idx}"
                     )
                 seen.add(idx)
             if not seen:
                 raise ConfigValidationError(
-                    "PolicySettings.compressible_layers must be non-empty when set"
+                    f"PolicySettings.{field_name} must be non-empty when set"
                 )
 
 
