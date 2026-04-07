@@ -365,7 +365,14 @@ def _patch_attention_forward(attn_module, cache, layer_idx):
         # Output projection
         attn_output = attn_module.o_proj(attn_output)
 
-        return attn_output, None, past_key_value
+        # Newer transformers (>=4.45) Qwen2DecoderLayer unpacks
+        # `hidden_states, _ = self.self_attn(...)` — a 2-tuple of
+        # (attn_output, attn_weights). Older versions unpacked a 3-tuple
+        # that also included past_key_value. We manage the cache
+        # ourselves via the TQ cache object, so past_key_value is always
+        # None/unused; return the 2-tuple shape the current call site
+        # expects.
+        return attn_output, None
 
     attn_module.forward = tq_forward
 
