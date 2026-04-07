@@ -210,7 +210,13 @@ class QJLProjection:
         self.S = torch.randn(d, d, generator=gen, device=device)
 
     def quantize(self, x):
-        return (x @ self.S.T).sign().to(torch.int8)
+        # self.S is allocated via torch.randn (float32). Callers may pass
+        # x in the model dtype (bfloat16 on Qwen2.5), which would raise
+        # "mat1 and mat2 to have the same dtype" in the matmul. Cast the
+        # projection to x's dtype on the fly — the subsequent .sign()
+        # collapses to int8 anyway, so precision loss is irrelevant.
+        S = self.S if self.S.dtype == x.dtype else self.S.to(x.dtype)
+        return (x @ S.T).sign().to(torch.int8)
 
     def to(self, device):
         self.S = self.S.to(device)
