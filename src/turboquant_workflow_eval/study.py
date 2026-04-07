@@ -8,7 +8,6 @@ from typing import Any
 
 import torch
 
-from .code_runner import extract_python_code, run_code_with_tests
 from .generation import generate_one
 from .import_utils import load_object
 from .loader import load_model_module, load_policy_module, load_study_module
@@ -26,12 +25,11 @@ from .schema import (
     EarlyStopConfig,
     PolicyConfig,
     StudyConfig,
-    ThresholdsConfig,
     model_to_legacy_dict,
     policy_to_legacy_dict,
     replace_path,
 )
-from .scoring import check_reference_answer, compute_semantic_similarity, compute_verdict
+from .scoring import compute_divergence, compute_kv_cache_bytes
 from .types import StudyContext
 from .events import EventBus, StudyEvent
 
@@ -72,19 +70,16 @@ class StudyController:
     def check_early_stop(self, row: dict) -> bool:
         """Check early-stop conditions after a prompt completes.
 
-        Returns True if the study should stop.
+        Returns True if the study should stop. The legacy "red verdict"
+        condition (``EarlyStopConfig.max_red_verdicts``) is intentionally
+        a no-op in the divergence-metrics world: rows no longer carry a
+        verdict, and the meaningful per-row signal is captured by the
+        post-hoc divergence + KV-cache scoring rather than mid-run.
+        Only the error-rate guard remains live.
         """
         self._prompt_count += 1
         if row.get("error"):
             self._error_count += 1
-        if row.get("verdict") == "red":
-            self._red_count += 1
-
-        max_red = self._early_stop.max_red_verdicts
-        if max_red is not None and self._red_count >= max_red:
-            if self._event_bus:
-                self._event_bus.emit_new("early_stop", reason=f"Hit {self._red_count} red verdicts (max: {max_red})")
-            return True
 
         max_error_rate = self._early_stop.max_error_rate
         if max_error_rate is not None and self._prompt_count > 0:
@@ -247,8 +242,22 @@ def _run_single_prompt(
         "title": prompt.title,
         "watch_for": prompt.watch_for,
         "prompt_text": prompt.prompt,
+        # Policy knobs persisted on the row so the post-hoc divergence and
+        # KV-cache-bytes scoring (run after the full study completes) can
+        # reconstruct the per-row policy without having to look it back up
+        # against the live PolicyConfig list.
+        "bit_width": settings.bit_width,
         "residual_window": settings.residual_window,
         "key_strategy": settings.key_strategy,
+        "value_strategy": settings.value_strategy,
+        "compressible_layers": (
+            list(settings.compressible_layers)
+            if settings.compressible_layers is not None else None
+        ),
+        "compressible_heads": (
+            list(settings.compressible_heads)
+            if settings.compressible_heads is not None else None
+        ),
         **first_result,
     }
 
@@ -260,22 +269,6 @@ def _run_single_prompt(
         row["vram_mean"] = vram_stats["mean"]
         row["vram_std"] = vram_stats["std"]
         row["repetitions"] = repetitions
-
-    row["math_correct"] = check_reference_answer(first_result["output_text"], prompt.reference_answer)
-
-    if prompt.test_cases:
-        code = extract_python_code(first_result["output_text"])
-        if code:
-            code_result = run_code_with_tests(code, list(prompt.test_cases))
-            row["code_passed"] = code_result["passed"]
-            row["code_failed"] = code_result["failed"]
-            row["code_errors"] = code_result["errors"]
-            row["code_verdict"] = code_result["verdict"]
-        else:
-            row["code_verdict"] = "error"
-            row["code_passed"] = 0
-            row["code_failed"] = 0
-            row["code_errors"] = 1
 
     return row
 
@@ -300,18 +293,17 @@ def run_policy(
 ) -> list[dict]:
     """Run all prompts for one policy and return result rows.
 
-    If *baseline_by_prompt* is provided, each row receives a provisional
-    verdict (and provisional ``output_length_delta_pct`` /
-    ``semantic_similarity``) immediately after generation. This lets the
-    early-stop controller and ``prompt_completed`` events fire on a real
-    verdict instead of ``None``. ``score_results`` is still called at the
-    end of the study to (idempotently) finalize the same fields.
+    If *baseline_by_prompt* is provided it is populated with the baseline
+    policy's rows as they're produced, so downstream consumers (the early-
+    stop controller, the live event stream) can look up baseline outputs
+    while later policies are still running. The full divergence + KV-cache
+    accounting is computed once by ``score_results`` after every policy
+    has finished.
     """
     is_baseline_policy = (
         baseline_by_prompt is not None
         and policy.name == ctx.baseline_policy_name
     )
-    thresholds = ctx.thresholds
     rows: list[dict] = []
 
     if event_bus:
@@ -350,57 +342,43 @@ def run_policy(
                 "title": prompt.title,
                 "watch_for": prompt.watch_for,
                 "prompt_text": prompt.prompt,
+                "bit_width": settings.bit_width,
                 "residual_window": settings.residual_window,
                 "key_strategy": settings.key_strategy,
+                "value_strategy": settings.value_strategy,
+                "compressible_layers": (
+                    list(settings.compressible_layers)
+                    if settings.compressible_layers is not None else None
+                ),
+                "compressible_heads": (
+                    list(settings.compressible_heads)
+                    if settings.compressible_heads is not None else None
+                ),
                 "output_text": f"[ERROR] {exc}",
+                "output_token_ids": [],
                 "output_tokens": 0,
                 "latency_s": 0.0,
                 "tokens_per_second": None,
                 "peak_vram_gb": None,
                 "rendered_prompt": "",
                 "prompt_tokens": 0,
-                "math_correct": None,
                 "error": str(exc),
-                "verdict": "error",
-                "code_verdict": "error",
-                "code_passed": 0,
-                "code_failed": 0,
-                "code_errors": 1,
-                "semantic_similarity": None,
-                "output_length_delta_pct": 0.0,
             }
             if event_bus:
                 event_bus.emit_new("error", policy_name=policy.name, prompt_id=prompt.id, error=str(exc))
 
-        # Provisional scoring so early-stop and prompt_completed events
-        # see a real verdict before score_results runs at the end.
-        if baseline_by_prompt is not None and not row.get("error"):
-            if is_baseline_policy:
-                baseline_by_prompt.setdefault(prompt.id, row)
-            bl = baseline_by_prompt.get(prompt.id)
-            bl_tokens = bl["output_tokens"] if bl else 0
-            if bl_tokens and bl_tokens > 0:
-                row["output_length_delta_pct"] = (
-                    (row["output_tokens"] - bl_tokens) / bl_tokens
-                ) * 100
-            else:
-                row["output_length_delta_pct"] = 0.0
-            if bl and bl is not row:
-                row["semantic_similarity"] = compute_semantic_similarity(
-                    bl["output_text"], row["output_text"]
-                )
-            else:
-                row["semantic_similarity"] = None
-            row["verdict"] = compute_verdict(
-                row, bl if bl is not row else None, thresholds
-            )
+        # Stash baseline rows as soon as they're produced so subsequent
+        # policies and live consumers can look them up by prompt_id, even
+        # though full divergence/KV-cache scoring runs later.
+        if baseline_by_prompt is not None and is_baseline_policy and not row.get("error"):
+            baseline_by_prompt.setdefault(prompt.id, row)
 
         rows.append(row)
         if writer:
             writer.write_row(row)
 
         if event_bus:
-            event_bus.emit_new("prompt_completed", policy_name=policy.name, prompt_id=prompt.id, verdict=row.get("verdict"))
+            event_bus.emit_new("prompt_completed", policy_name=policy.name, prompt_id=prompt.id)
 
         # Early stopping
         if controller and controller.check_early_stop(row):
@@ -420,16 +398,22 @@ def run_policy(
 
 def score_results(
     rows: list[dict],
-    thresholds: ThresholdsConfig | None = None,
     baseline_policy_name: str | None = None,
+    *,
+    model_info: dict[str, int] | None = None,
 ) -> list[dict]:
-    """Compute baseline deltas, similarity, and verdicts on existing rows.
+    """Annotate every row with divergence-vs-baseline and KV-cache-bytes
+    metrics. Mutates *rows* in place; returned for convenience.
 
-    Mutates *rows* in-place and returns them for convenience.
+    The baseline row for each prompt is selected by *baseline_policy_name*
+    (auto-detected when only one policy is present, error otherwise).
 
-    The baseline row for each prompt is selected by *baseline_policy_name*.
-    If only one policy is present in *rows*, that policy is used as the
-    baseline by default. Otherwise *baseline_policy_name* is required.
+    *model_info* must contain ``num_hidden_layers``, ``num_key_value_heads``,
+    and ``head_dim``. It is fetched once at model load time in
+    ``run_workflow_study`` and threaded through here so that this function
+    stays torch-free and unit-testable. When called from ``--rescore`` on a
+    cold ``rows.jsonl`` it can be omitted, in which case KV-cache bytes are
+    set to ``None`` on every row (divergence is still computed).
     """
     policy_names = {row.get("policy_name") for row in rows if row.get("policy_name")}
 
@@ -471,26 +455,68 @@ def score_results(
                 "cannot use as reference."
             )
 
+    can_score_kv = model_info is not None
+    if can_score_kv:
+        num_layers = int(model_info["num_hidden_layers"])
+        num_kv_heads = int(model_info["num_key_value_heads"])
+        head_dim = int(model_info["head_dim"])
+
     for row in rows:
-        # Skip rescoring of error rows; their fields were set at creation time.
         if row.get("error"):
             continue
 
         pid = row["prompt_id"]
         bl = baseline_by_prompt.get(pid)
+        is_baseline_row = (bl is row)
 
-        bl_tokens = bl["output_tokens"] if bl else 0
-        if bl_tokens and bl_tokens > 0:
-            row["output_length_delta_pct"] = ((row["output_tokens"] - bl_tokens) / bl_tokens) * 100
+        # --- Token-level divergence vs baseline ---
+        if is_baseline_row:
+            row["exact_match"] = True
+            row["first_divergence_token"] = -1
+            row["common_prefix_tokens"] = int(row.get("output_tokens") or 0)
+            row["common_prefix_frac"] = 1.0
+            row["token_edit_distance"] = 0
+            row["output_length_delta_tokens"] = 0
         else:
-            row["output_length_delta_pct"] = 0.0
+            policy_ids = row.get("output_token_ids") or []
+            baseline_ids = (bl.get("output_token_ids") or []) if bl else []
+            row.update(compute_divergence(policy_ids, baseline_ids))
 
-        if bl and bl is not row:
-            row["semantic_similarity"] = compute_semantic_similarity(bl["output_text"], row["output_text"])
-        else:
-            row["semantic_similarity"] = None
-
-        row["verdict"] = compute_verdict(row, bl if bl is not row else None, thresholds)
+        # --- Theoretical KV-cache bytes ---
+        if can_score_kv:
+            if is_baseline_row:
+                # Baseline reference: no compression. Force the helper to
+                # return ratio == 1.0 by claiming a window that covers the
+                # entire sequence and an empty compressible-head selector.
+                seq_len = int(row.get("prompt_tokens", 0)) + int(row.get("output_tokens", 0))
+                kv = compute_kv_cache_bytes(
+                    prompt_tokens=int(row.get("prompt_tokens", 0)),
+                    output_tokens=int(row.get("output_tokens", 0)),
+                    num_layers=num_layers,
+                    num_kv_heads=num_kv_heads,
+                    head_dim=head_dim,
+                    bit_width=16,
+                    residual_window=max(seq_len, 1),
+                    compressible_layers=(),
+                    compressible_heads=(),
+                    key_strategy="mse",
+                    value_strategy="mse",
+                )
+            else:
+                kv = compute_kv_cache_bytes(
+                    prompt_tokens=int(row.get("prompt_tokens", 0)),
+                    output_tokens=int(row.get("output_tokens", 0)),
+                    num_layers=num_layers,
+                    num_kv_heads=num_kv_heads,
+                    head_dim=head_dim,
+                    bit_width=int(row.get("bit_width", 16)),
+                    residual_window=int(row.get("residual_window", 0)),
+                    compressible_layers=row.get("compressible_layers"),
+                    compressible_heads=row.get("compressible_heads"),
+                    key_strategy=str(row.get("key_strategy", "mse")),
+                    value_strategy=str(row.get("value_strategy", "mse")),
+                )
+            row.update(kv)
 
     return rows
 
@@ -508,6 +534,7 @@ def write_results(
     repetitions: int,
     study_config_path: Path | None = None,
     baseline_policy_name: str | None = None,
+    model_info: dict[str, int] | None = None,
 ) -> dict:
     """Write all output artefacts and return the summary dict."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -523,10 +550,8 @@ def write_results(
         write_text_outputs(output_dir, rows)
     write_examples_markdown(output_dir / "examples.md", rows)
 
-    verdict_counts = {"green": 0, "yellow": 0, "red": 0}
-    for row in rows:
-        v = row.get("verdict", "green")
-        verdict_counts[v] = verdict_counts.get(v, 0) + 1
+    from .reporting import summarize_divergence
+    divergence_summary = summarize_divergence(rows, baseline_policy_name)
 
     summary = {
         "study_name": study.name,
@@ -537,7 +562,11 @@ def write_results(
         "row_count": len(rows),
         "repetitions": repetitions,
         "baseline_policy_name": baseline_policy_name,
-        "verdict_summary": verdict_counts,
+        "divergence_summary": divergence_summary,
+        # Persist model topology so a cold --rescore (no GPU, no torch
+        # import) can rebuild KV-cache-byte annotations from rows.jsonl
+        # alone.
+        "model_info": model_info,
         "policies_used": policies_used,
         "output_dir": str(output_dir),
     }
@@ -617,6 +646,11 @@ def run_workflow_study(
     tokenizer = None
     loader_name = None
     needs_reload = True
+    # Captured once at first model load and threaded into score_results so
+    # the post-hoc KV-cache-bytes calculation can run without holding a
+    # torch reference (the model may already be torn down by the time
+    # scoring runs in some control flows).
+    model_info: dict[str, int] | None = None
 
     legacy_model_cfg = model_to_legacy_dict(ctx.study.model)
 
@@ -637,6 +671,19 @@ def run_workflow_study(
                     torch.cuda.empty_cache()
             model, tokenizer, loader_name = load_model_and_tokenizer(legacy_model_cfg)
             needs_reload = False
+            if model_info is None:
+                cfg = model.config
+                num_attn_heads = int(getattr(cfg, "num_attention_heads", 0))
+                num_kv_heads = int(getattr(cfg, "num_key_value_heads", num_attn_heads))
+                head_dim = int(
+                    getattr(cfg, "head_dim", 0)
+                    or (cfg.hidden_size // num_attn_heads if num_attn_heads else 0)
+                )
+                model_info = {
+                    "num_hidden_layers": int(getattr(cfg, "num_hidden_layers", 0)),
+                    "num_key_value_heads": num_kv_heads,
+                    "head_dim": head_dim,
+                }
 
         legacy_policy_cfg = policy_to_legacy_dict(policy)
         model, tokenizer = adapter.prepare_model(
@@ -692,7 +739,11 @@ def run_workflow_study(
         raise RuntimeError("No enabled policies were run. Enable at least one policy config.")
 
     # --- Post-processing ---
-    score_results(rows, ctx.thresholds, baseline_policy_name=ctx.baseline_policy_name)
+    score_results(
+        rows,
+        baseline_policy_name=ctx.baseline_policy_name,
+        model_info=model_info,
+    )
 
     # Resolve the effective baseline name for provenance: if the user did not
     # set one and exactly one policy ran, record that policy's name so the
@@ -713,6 +764,7 @@ def run_workflow_study(
         repetitions=ctx.repetitions,
         study_config_path=Path(study_config_path) if study_config_path else None,
         baseline_policy_name=effective_baseline,
+        model_info=model_info,
     )
 
     # Final cleanup

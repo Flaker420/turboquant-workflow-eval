@@ -1,9 +1,29 @@
-"""Automated quality scoring for workflow study outputs."""
+"""Automated quality scoring for workflow study outputs.
+
+This module used to expose a green/yellow/red ``compute_verdict`` system that
+mixed latency-regression, fuzzy semantic similarity, math-rubric and code-
+execution checks into one categorical label per row. That system measured
+the wrong thing for this project: a turboquant policy whose generated tokens
+are byte-identical to baseline could still be flagged "yellow" on latency
+jitter, and the verdict gave no insight into either the actual divergence
+from baseline or the actual KV-cache compression achieved.
+
+The new world: every non-baseline row carries direct token-level divergence
+metrics against its matching baseline row, plus a theoretical KV-cache-bytes
+calculation derived from the policy settings. Reports become a Pareto-style
+``(compression_ratio, exact_match_rate)`` view instead of verdict counts.
+
+The legacy ``extract_numbers`` / ``check_reference_answer`` /
+``compute_semantic_similarity`` helpers stay in the module — they have other
+callers in the test suite and may yet be useful for diagnostic side-channels
+— but the verdict pipeline (``compute_verdict``, ``_resolve_thresholds``,
+``_DEFAULT_THRESHOLDS``) is gone.
+"""
 
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Sequence
 
 
 # ---------------------------------------------------------------------------
@@ -111,140 +131,190 @@ def compute_semantic_similarity(text_a: str, text_b: str) -> float | None:
 
 
 # ---------------------------------------------------------------------------
-# Green / Yellow / Red verdict system
+# Token-level divergence vs baseline
 # ---------------------------------------------------------------------------
 
-_DEFAULT_THRESHOLDS: dict[str, float] = {
-    "latency_yellow_pct": 10.0,
-    "latency_red_pct": 25.0,
-    "similarity_yellow": 0.92,
-    "similarity_red": 0.80,
-    "output_length_yellow_pct": 15.0,
-    "output_length_red_pct": 30.0,
-}
 
+def levenshtein(a: Sequence[int], b: Sequence[int]) -> int:
+    """Plain O(n*m) Levenshtein distance over two integer sequences.
 
-def _thresholds_to_dict(thresholds: Any) -> dict[str, Any]:
-    """Coerce a ``ThresholdsConfig`` (or already-flat dict) to a flat dict.
-
-    None-valued fields are dropped so they fall back to ``_DEFAULT_THRESHOLDS``.
-    The ``per_category`` mapping is unfolded into top-level keys keyed by
-    category name (matching the legacy nested format that ``_resolve_thresholds``
-    already understands).
+    Used here only over short token-id lists (n, m <= max_new_tokens, typically
+    <= a few hundred), so the quadratic memory cost is irrelevant. Kept
+    dependency-free so it stays inside the torch-free sandbox tests.
     """
-    if thresholds is None:
-        return {}
-    if isinstance(thresholds, dict):
-        return thresholds
-    # Treat as ThresholdsConfig dataclass.
-    out: dict[str, Any] = {}
-    for f in ("latency_yellow_pct", "latency_red_pct", "similarity_yellow",
-              "similarity_red", "output_length_yellow_pct", "output_length_red_pct"):
-        v = getattr(thresholds, f, None)
-        if v is not None:
-            out[f] = v
-    per_category = getattr(thresholds, "per_category", None) or {}
-    if per_category:
-        out["default"] = dict(out)  # snapshot of the flat fields
-        for cat, sub in per_category.items():
-            out[cat] = _thresholds_to_dict(sub)
-    return out
+    n, m = len(a), len(b)
+    if n == 0:
+        return m
+    if m == 0:
+        return n
+    # Two-row DP. previous[j] = distance(a[:i-1], b[:j]).
+    previous = list(range(m + 1))
+    current = [0] * (m + 1)
+    for i in range(1, n + 1):
+        current[0] = i
+        ai = a[i - 1]
+        for j in range(1, m + 1):
+            cost = 0 if ai == b[j - 1] else 1
+            current[j] = min(
+                previous[j] + 1,        # deletion
+                current[j - 1] + 1,     # insertion
+                previous[j - 1] + cost,  # substitution
+            )
+        previous, current = current, previous
+    return previous[m]
 
 
-def _resolve_thresholds(thresholds: Any, category: str | None = None) -> dict[str, float]:
-    """Resolve thresholds with per-category override support.
+def _common_prefix_length(a: Sequence[int], b: Sequence[int]) -> int:
+    n = min(len(a), len(b))
+    i = 0
+    while i < n and a[i] == b[i]:
+        i += 1
+    return i
 
-    Accepts a ``ThresholdsConfig``, a flat dict, or a nested dict with
-    ``"default"`` and category-specific keys::
 
-        thresholds:
-          default:
-            latency_red_pct: 25.0
-          math:
-            latency_red_pct: 50.0
+def compute_divergence(
+    policy_ids: Sequence[int],
+    baseline_ids: Sequence[int],
+) -> dict[str, Any]:
+    """Token-level comparison of one policy output against the baseline.
 
-    Falls back to ``_DEFAULT_THRESHOLDS`` for any missing key.
+    Returns a dict with the metrics that the new reporting layer consumes.
+    All values are JSON-serializable plain Python types.
+
+    ``first_divergence_token`` semantics:
+      * If the two sequences are identical, equals ``len(baseline_ids)`` and
+        ``exact_match`` is ``True``.
+      * If one is a strict prefix of the other (and the other has extra
+        tokens), equals ``min(len(policy), len(baseline))`` — the index where
+        the shorter sequence "ran out".
+      * Otherwise equals the index of the first differing position.
+    The baseline row itself never reaches this function; the study driver
+    fills sentinel values for it directly.
     """
-    thresholds = _thresholds_to_dict(thresholds)
-    if not thresholds:
-        return dict(_DEFAULT_THRESHOLDS)
+    p = list(policy_ids)
+    b = list(baseline_ids)
+    prefix = _common_prefix_length(p, b)
+    exact = (len(p) == len(b)) and prefix == len(b)
+    base_len = max(len(b), 1)
+    return {
+        "exact_match": exact,
+        "first_divergence_token": prefix,
+        "common_prefix_tokens": prefix,
+        "common_prefix_frac": prefix / base_len,
+        "token_edit_distance": levenshtein(p, b),
+        "output_length_delta_tokens": len(p) - len(b),
+    }
 
-    # Detect nested vs flat format
-    has_nested = "default" in thresholds and isinstance(thresholds["default"], dict)
-    if has_nested:
-        base = {**_DEFAULT_THRESHOLDS, **thresholds.get("default", {})}
-        if category and category in thresholds and isinstance(thresholds[category], dict):
-            base = {**base, **thresholds[category]}
-        return base
 
-    # Flat format (backward compatible)
-    return {**_DEFAULT_THRESHOLDS, **thresholds}
+# ---------------------------------------------------------------------------
+# KV-cache byte accounting
+# ---------------------------------------------------------------------------
+
+# Bytes per element in the various dtypes the cache can hold. We treat the
+# baseline KV cache as bf16 (2 bytes/elem); turboquant compresses entries
+# down to ``bit_width / 8`` bytes per element via the MSE codebook. These
+# constants are intentionally simple — the goal is "directionally correct
+# memory accounting that tracks the policy knobs", not a byte-exact
+# reproduction of every allocator quirk in the runtime cache.
+_BASELINE_BYTES_PER_ELEM = 2.0  # bf16
 
 
-def compute_verdict(
-    row: dict[str, Any],
-    baseline_row: dict[str, Any] | None,
-    thresholds: Any = None,
-) -> str:
-    """Return ``'green'``, ``'yellow'``, or ``'red'`` for a single result row.
+def _resolve_indices(
+    indices: Sequence[int] | None,
+    total: int,
+) -> tuple[int, ...]:
+    """Resolve a ``compressible_layers`` / ``compressible_heads`` selector.
 
-    *baseline_row* is the corresponding row from the baseline policy for the
-    same prompt. If ``None`` (i.e. this row **is** the baseline), returns
-    ``'green'``.
-
-    *thresholds* can be a flat dict of threshold values, or a nested dict
-    with ``"default"`` and per-category overrides (e.g. ``"math"``,
-    ``"coding"``).
+    ``None`` (or an empty tuple coming back from JSON deserialization that
+    originally meant "all") expands to ``range(total)`` so the bookkeeping
+    matches the runtime cache, which treats ``None`` as "compress everything".
     """
-    if baseline_row is None:
-        return "green"
+    if indices is None:
+        return tuple(range(total))
+    return tuple(int(i) for i in indices)
 
-    category = row.get("category")
-    t = _resolve_thresholds(thresholds, category)
-    worst = "green"
 
-    def _escalate(level: str) -> str:
-        order = {"green": 0, "yellow": 1, "red": 2}
-        return level if order.get(level, 0) > order.get(worst, 0) else worst
+def compute_kv_cache_bytes(
+    *,
+    prompt_tokens: int,
+    output_tokens: int,
+    num_layers: int,
+    num_kv_heads: int,
+    head_dim: int,
+    bit_width: int,
+    residual_window: int,
+    compressible_layers: Sequence[int] | None,
+    compressible_heads: Sequence[int] | None,
+    key_strategy: str,
+    value_strategy: str,
+) -> dict[str, Any]:
+    """Theoretical KV-cache bytes for one (policy, sequence) pair.
 
-    # --- Latency regression ---
-    bl_lat = baseline_row.get("latency_s") or baseline_row.get("latency_mean")
-    cur_lat = row.get("latency_s") or row.get("latency_mean")
-    if bl_lat and cur_lat and bl_lat > 0:
-        pct = ((cur_lat - bl_lat) / bl_lat) * 100
-        if pct > t["latency_red_pct"]:
-            worst = _escalate("red")
-        elif pct > t["latency_yellow_pct"]:
-            worst = _escalate("yellow")
+    The baseline number is the bf16 cache size for the full sequence at the
+    given layer/head/head_dim shape. The policy number applies the per-policy
+    knobs:
 
-    # --- Output-length delta ---
-    bl_tokens = baseline_row.get("output_tokens", 0)
-    cur_tokens = row.get("output_tokens", 0)
-    if bl_tokens and bl_tokens > 0:
-        length_pct = abs((cur_tokens - bl_tokens) / bl_tokens) * 100
-        if length_pct > t["output_length_red_pct"]:
-            worst = _escalate("red")
-        elif length_pct > t["output_length_yellow_pct"]:
-            worst = _escalate("yellow")
+      * Only layers in ``compressible_layers`` are eligible for compression
+        (None ⇒ all layers).
+      * Within an eligible layer, only KV heads in ``compressible_heads`` are
+        eligible (None ⇒ all heads).
+      * Within an eligible head, the most recent ``residual_window`` tokens
+        stay at bf16 (the runtime "uncompressed window") and the remainder
+        is stored at ``bit_width / 8`` bytes per element for both K and V.
+      * ``key_strategy == "mse+qjl"`` adds a small QJL side-channel (one
+        byte per compressed K token per head, sign bits packed to int8).
+        This is a crude but directionally-correct overhead — refine when
+        the QJL bookkeeping in core.py grows additional metadata.
 
-    # --- Semantic similarity ---
-    sim = row.get("semantic_similarity")
-    if sim is not None:
-        if sim < t["similarity_red"]:
-            worst = _escalate("red")
-        elif sim < t["similarity_yellow"]:
-            worst = _escalate("yellow")
+    Returns kv_cache_bytes_baseline / _policy / compression_ratio /
+    bytes_saved.
 
-    # --- Math correctness ---
-    math_correct = row.get("math_correct")
-    if math_correct is False:
-        worst = _escalate("red")
+    The function is pure: no torch, no model, no I/O. It is the single source
+    of truth for the "compression" axis in the new Pareto report.
+    """
+    seq_len = max(int(prompt_tokens) + int(output_tokens), 0)
+    layers = _resolve_indices(compressible_layers, num_layers)
+    heads = _resolve_indices(compressible_heads, num_kv_heads)
+    layer_set = frozenset(layers)
+    head_set = frozenset(heads)
 
-    # --- Code execution ---
-    code_verdict = row.get("code_verdict")
-    if code_verdict == "fail":
-        worst = _escalate("red")
-    elif code_verdict == "error":
-        worst = _escalate("yellow")
+    # Baseline: every layer * every kv head * seq_len * head_dim, K + V, bf16.
+    elems_per_token = num_kv_heads * head_dim * 2  # K + V
+    baseline = float(num_layers * seq_len * elems_per_token * _BASELINE_BYTES_PER_ELEM)
 
-    return worst
+    compressed_bytes_per_elem = bit_width / 8.0
+    qjl_overhead_bytes_per_token = 1.0 if key_strategy == "mse+qjl" else 0.0
+
+    window = max(int(residual_window), 0)
+    uncompressed_tokens = min(window, seq_len)
+    compressed_tokens = max(seq_len - window, 0)
+
+    # Per-head, per-layer cost when the head IS compressed.
+    compressed_head_kv_bytes = (
+        uncompressed_tokens * head_dim * 2 * _BASELINE_BYTES_PER_ELEM  # window K+V
+        + compressed_tokens * head_dim * 2 * compressed_bytes_per_elem  # quantized K+V
+        + compressed_tokens * qjl_overhead_bytes_per_token  # QJL side channel on K
+    )
+    # Per-head, per-layer cost when the head is NOT compressed (full bf16).
+    full_head_kv_bytes = seq_len * head_dim * 2 * _BASELINE_BYTES_PER_ELEM
+
+    policy = 0.0
+    for layer_idx in range(num_layers):
+        if layer_idx not in layer_set:
+            policy += num_kv_heads * full_head_kv_bytes
+            continue
+        for head_idx in range(num_kv_heads):
+            if head_idx in head_set:
+                policy += compressed_head_kv_bytes
+            else:
+                policy += full_head_kv_bytes
+
+    baseline_int = int(round(baseline))
+    policy_int = int(round(policy))
+    ratio = (baseline / policy) if policy > 0 else 1.0
+    return {
+        "kv_cache_bytes_baseline": baseline_int,
+        "kv_cache_bytes_policy": policy_int,
+        "kv_cache_compression_ratio": float(ratio),
+        "kv_cache_bytes_saved": baseline_int - policy_int,
+    }

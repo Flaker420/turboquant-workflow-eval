@@ -86,6 +86,9 @@ def generate_one(
     output_ids = generated[0][prompt_tokens:]
     output_tokens = int(output_ids.shape[-1])
     output_text = tokenizer.decode(output_ids, skip_special_tokens=True).strip()
+    # Plain Python list of token IDs so the row can be JSON-serialized and so
+    # downstream divergence scoring against the baseline row is trivial.
+    output_token_ids = [int(t) for t in output_ids.tolist()]
 
     tokens_per_second = (output_tokens / latency_s) if latency_s > 0 else None
 
@@ -97,4 +100,5 @@ def generate_one(
         "tokens_per_second": tokens_per_second,
         "peak_vram_gb": _peak_vram_gb(device),
         "output_text": output_text,
+        "output_token_ids": output_token_ids,
     }

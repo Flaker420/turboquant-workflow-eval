@@ -1,15 +1,30 @@
-"""Re-score existing study results with new thresholds — no GPU needed."""
+"""Re-score existing study results — no GPU needed.
+
+The legacy version of this module pushed configurable verdict thresholds
+through ``score_results``. Verdicts are gone, and so is the threshold
+plumbing. The remaining job of ``rescore`` is mechanical: load a
+``rows.jsonl`` produced by a prior run, recompute the new divergence /
+KV-cache-bytes annotations, and write a refreshed
+``run_summary.json`` / ``workflow_compare.csv`` / ``examples.md`` next to
+the rows.
+
+KV-cache-bytes need model topology (``num_hidden_layers``,
+``num_key_value_heads``, ``head_dim``); when the rescore is invoked without
+a live model — which is the whole point of the cold-rescore mode — we
+attempt to read those values from the prior ``run_summary.json``'s
+``policies_used`` block (where they were stashed during the original run),
+and if they're missing we fall through with ``model_info=None``. In that
+fallback the divergence metrics are still populated; only the KV-cache
+columns end up empty.
+"""
 
 from __future__ import annotations
 
-import dataclasses
 import json
 from pathlib import Path
 from typing import Any
 
-from .loader import load_study_module
-from .reporting import write_csv, write_examples_markdown, write_run_summary
-from .schema import ThresholdsConfig
+from .reporting import write_csv, write_examples_markdown, write_run_summary, summarize_divergence
 from .study import score_results
 
 
@@ -23,88 +38,30 @@ def _load_run_summary(rows_jsonl_path: Path) -> dict | None:
         return None
 
 
-def _coerce_threshold_value(raw: str) -> Any:
-    """Match the legacy ``apply_dot_overrides`` coercion semantics."""
-    s = raw.strip()
-    low = s.lower()
-    if low in ("true", "false"):
-        return low == "true"
-    if low in ("none", "null"):
+def _model_info_from_summary(prior_summary: dict | None) -> dict[str, int] | None:
+    if not prior_summary:
         return None
-    try:
-        return int(s)
-    except ValueError:
-        pass
-    try:
-        return float(s)
-    except ValueError:
-        pass
-    return s
-
-
-def _resolve_thresholds(
-    study_config: str | Path | None,
-    overrides: list[str] | None,
-) -> ThresholdsConfig:
-    """Build a :class:`ThresholdsConfig` from an optional study module plus
-    dot-notation CLI overrides.
-
-    Override forms accepted (the prefix is optional)::
-
-        thresholds.latency_red_pct=50
-        latency_red_pct=50
-    """
-    if study_config:
-        study = load_study_module(study_config)
-        base = study.thresholds
-    else:
-        base = ThresholdsConfig()
-
-    if not overrides:
-        return base
-
-    valid_fields = {f.name for f in dataclasses.fields(ThresholdsConfig)}
-    valid_fields.discard("per_category")  # not exposed via flat overrides
-
-    updates: dict[str, Any] = {}
-    for item in overrides:
-        if "=" not in item:
-            raise ValueError(f"Override must be key=value, got {item!r}")
-        key, value = item.split("=", 1)
-        key = key.strip()
-        if key.startswith("thresholds."):
-            key = key[len("thresholds.") :]
-        if key not in valid_fields:
-            raise ValueError(
-                f"Unknown threshold field {key!r}. Valid fields: {sorted(valid_fields)}"
-            )
-        updates[key] = _coerce_threshold_value(value)
-
-    return dataclasses.replace(base, **updates)
+    info = prior_summary.get("model_info")
+    if not isinstance(info, dict):
+        return None
+    required = {"num_hidden_layers", "num_key_value_heads", "head_dim"}
+    if not required.issubset(info):
+        return None
+    return {k: int(info[k]) for k in required}
 
 
 def rescore(
     rows_jsonl_path: str | Path,
-    thresholds: dict[str, Any] | None = None,
     output_dir: str | Path | None = None,
-    study_config: str | Path | None = None,
-    overrides: list[str] | None = None,
     baseline_policy_name: str | None = None,
+    **_legacy_kwargs: Any,
 ) -> list[dict]:
-    """Load rows from JSONL, recompute verdicts with refreshed thresholds.
+    """Reload a ``rows.jsonl`` and recompute divergence / KV-cache annotations.
 
-    Resolution order for thresholds (later wins):
-        1. ``study_config`` YAML's ``thresholds`` block (if provided)
-        2. explicit ``thresholds`` argument
-        3. ``overrides`` (dot-notation, e.g. ``thresholds.latency_red_pct=50``
-           or the bare ``latency_red_pct=50``)
-
-    Baseline policy resolution:
-        1. ``baseline_policy_name`` argument
-        2. ``baseline_policy_name`` from a sibling ``run_summary.json``
-        3. single-policy auto-detect (handled by ``score_results``)
-
-    Always emits a refreshed ``run_summary.json`` next to the rescored rows.
+    Any legacy keyword arguments (``thresholds``, ``study_config``,
+    ``overrides``) are accepted and silently dropped — they were the
+    verdict-system knobs and have no analogue in the divergence-metrics
+    world. Callers should remove them.
     """
     rows_jsonl_path = Path(rows_jsonl_path)
     rows: list[dict] = []
@@ -117,37 +74,33 @@ def rescore(
     if not rows:
         raise RuntimeError(f"No rows found in {rows_jsonl_path}")
 
-    resolved_thresholds = _resolve_thresholds(study_config, overrides)
-    if thresholds:
-        # Merge any inline overrides on top of the resolved dataclass.
-        valid_fields = {f.name for f in dataclasses.fields(ThresholdsConfig)} - {"per_category"}
-        unknown = set(thresholds) - valid_fields
-        if unknown:
-            raise ValueError(
-                f"Unknown threshold field(s): {sorted(unknown)}. "
-                f"Valid: {sorted(valid_fields)}"
-            )
-        resolved_thresholds = dataclasses.replace(resolved_thresholds, **thresholds)
+    # Hard requirement of the divergence pipeline: every non-error row must
+    # carry the raw output token IDs. Old runs that predate the schema bump
+    # cannot be rescored — fail with one actionable message.
+    missing_ids = [
+        row.get("prompt_id", "?")
+        for row in rows
+        if not row.get("error") and "output_token_ids" not in row
+    ]
+    if missing_ids:
+        raise RuntimeError(
+            "rescore: rows.jsonl is missing the 'output_token_ids' field on "
+            f"{len(missing_ids)} row(s) (e.g. {missing_ids[:3]!r}). This file "
+            "was produced before the divergence-metrics schema bump and "
+            "cannot be rescored cold; rerun the study to regenerate it."
+        )
 
     prior_summary = _load_run_summary(rows_jsonl_path)
     if baseline_policy_name is None and prior_summary:
         baseline_policy_name = prior_summary.get("baseline_policy_name")
 
-    old_verdicts = {(r["policy_name"], r["prompt_id"]): r.get("verdict") for r in rows}
+    model_info = _model_info_from_summary(prior_summary)
 
     score_results(
         rows,
-        thresholds=resolved_thresholds,
         baseline_policy_name=baseline_policy_name,
+        model_info=model_info,
     )
-
-    changed = 0
-    for row in rows:
-        key = (row["policy_name"], row["prompt_id"])
-        if old_verdicts.get(key) != row.get("verdict"):
-            changed += 1
-            print(f"  {key[0]}:{key[1]}: {old_verdicts.get(key)} -> {row['verdict']}")
-    print(f"\nRe-scored {len(rows)} rows, {changed} verdict(s) changed.")
 
     target_dir = Path(output_dir) if output_dir else rows_jsonl_path.parent
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -164,27 +117,25 @@ def rescore(
     write_csv(target_dir / "workflow_compare.csv", rows)
     write_examples_markdown(target_dir / "examples.md", rows)
 
-    verdict_counts = {"green": 0, "yellow": 0, "red": 0}
-    for row in rows:
-        v = row.get("verdict", "green")
-        verdict_counts[v] = verdict_counts.get(v, 0) + 1
+    divergence_summary = summarize_divergence(rows, baseline_policy_name)
 
     summary: dict[str, Any] = dict(prior_summary or {})
     summary.update(
         {
             "row_count": len(rows),
-            "verdict_summary": verdict_counts,
+            "divergence_summary": divergence_summary,
             "baseline_policy_name": baseline_policy_name
             or summary.get("baseline_policy_name"),
             "rescored": True,
-            "rescore_thresholds": dataclasses.asdict(resolved_thresholds),
-            "rescore_verdicts_changed": changed,
             "output_dir": str(target_dir),
         }
     )
+    # Drop the stale verdict_summary field if the prior summary still
+    # carried one — it would otherwise survive the dict.update() above.
+    summary.pop("verdict_summary", None)
     write_run_summary(target_dir / "run_summary.json", summary)
 
-    print(f"Verdicts: {verdict_counts}")
+    print(f"Divergence summary: {divergence_summary}")
     print(f"Rescored outputs written to: {target_dir}")
 
     return rows
