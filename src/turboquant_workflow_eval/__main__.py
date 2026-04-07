@@ -31,7 +31,7 @@ from .schema import (
 # ---------------------------------------------------------------------------
 
 
-def _parse_int_list(text: str) -> tuple[int, ...]:
+def parse_int_list(text: str) -> tuple[int, ...]:
     """Parse a comma-separated int list (e.g. ``3,7,11,15``)."""
     items = [s.strip() for s in text.split(",") if s.strip()]
     try:
@@ -103,7 +103,7 @@ _PER_POLICY_KNOBS: list[tuple[str, str, Any]] = [
     ("residual-window", "residual_window", int),
     ("key-strategy", "key_strategy", str),
     ("value-strategy", "value_strategy", str),
-    ("compressible-layers", "compressible_layers", _parse_int_list),
+    ("compressible-layers", "compressible_layers", parse_int_list),
     ("profile", "profile", str),
 ]
 
@@ -153,7 +153,7 @@ def _apply_per_policy_overrides(
     return replace(study, policies=tuple(new_policies))
 
 
-def _apply_set_overrides(study: StudyConfig, items: list[str]) -> StudyConfig:
+def apply_set_overrides(study: StudyConfig, items: list[str]) -> StudyConfig:
     """Apply ``--set DOT.PATH=VALUE`` overrides via ``replace_path``."""
     for item in items:
         if "=" not in item:
@@ -163,7 +163,7 @@ def _apply_set_overrides(study: StudyConfig, items: list[str]) -> StudyConfig:
     return study
 
 
-def _apply_set_policy_overrides(
+def apply_set_policy_overrides(
     study: StudyConfig, items: list[str]
 ) -> StudyConfig:
     """Apply ``--set-policy NAME.DOT.PATH=VALUE`` overrides.
@@ -258,7 +258,7 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Override PolicySettings.key_strategy on every policy.")
     g.add_argument("--value-strategy", choices=("mse",), default=None,
                    help="Override PolicySettings.value_strategy on every policy.")
-    g.add_argument("--compressible-layers", type=_parse_int_list, default=None,
+    g.add_argument("--compressible-layers", type=parse_int_list, default=None,
                    metavar="3,7,11,...",
                    help="Override PolicySettings.compressible_layers on every policy "
                         "(comma-separated integer indices).")
@@ -440,9 +440,9 @@ def _apply_overrides(study: StudyConfig, args: argparse.Namespace) -> StudyConfi
 
     # 10. Generic escape hatches (last so they win over typed flags).
     if args.overrides:
-        study = _apply_set_overrides(study, args.overrides)
+        study = apply_set_overrides(study, args.overrides)
     if args.policy_overrides:
-        study = _apply_set_policy_overrides(study, args.policy_overrides)
+        study = apply_set_policy_overrides(study, args.policy_overrides)
 
     return study
 
