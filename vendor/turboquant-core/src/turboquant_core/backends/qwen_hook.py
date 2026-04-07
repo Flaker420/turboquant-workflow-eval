@@ -297,10 +297,24 @@ def _patch_attention_forward(attn_module, cache, layer_idx):
         K = attn_module.k_proj(hidden_states)
         V = attn_module.v_proj(hidden_states)
 
-        # Reshape to [batch, heads, seq_len, head_dim]
-        num_q_heads = attn_module.num_heads
-        num_kv_heads = attn_module.num_key_value_heads
-        head_dim = attn_module.head_dim
+        # Reshape to [batch, heads, seq_len, head_dim].
+        # Newer transformers (>=4.45) dropped the cached num_heads /
+        # num_key_value_heads / head_dim attributes from Qwen2Attention and
+        # expect callers to read them from attn_module.config. Fall back to
+        # the old attribute names for older transformers.
+        _cfg = getattr(attn_module, "config", None)
+        num_q_heads = getattr(attn_module, "num_heads", None)
+        if num_q_heads is None:
+            num_q_heads = _cfg.num_attention_heads
+        num_kv_heads = getattr(attn_module, "num_key_value_heads", None)
+        if num_kv_heads is None:
+            num_kv_heads = _cfg.num_key_value_heads
+        head_dim = getattr(attn_module, "head_dim", None)
+        if head_dim is None:
+            head_dim = getattr(
+                _cfg, "head_dim",
+                _cfg.hidden_size // _cfg.num_attention_heads,
+            )
 
         Q = Q.view(bsz, q_len, num_q_heads, head_dim).transpose(1, 2)
         K = K.view(bsz, q_len, num_kv_heads, head_dim).transpose(1, 2)
