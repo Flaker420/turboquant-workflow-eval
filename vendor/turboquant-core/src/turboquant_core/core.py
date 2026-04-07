@@ -719,8 +719,13 @@ class TQQuantizedCache:
         K_full[:, mask, :, :] = K_mse
         V_full[:, mask, :, :] = V_comp
         if complement:
-            K_full[:, complement, :, :] = entry["k_raw"]
-            V_full[:, complement, :, :] = entry["v_raw"]
+            # k_raw / v_raw preserve the model's original dtype (e.g. bfloat16),
+            # while K_mse / V_comp come out of tq_dequantize_mse as float32.
+            # Cast the passthrough slices to K_full's dtype so the index_put
+            # doesn't raise "source and destination dtypes match" on mixed
+            # bf16 / fp32 models.
+            K_full[:, complement, :, :] = entry["k_raw"].to(K_full.dtype)
+            V_full[:, complement, :, :] = entry["v_raw"].to(V_full.dtype)
         return K_full, V_full
 
     def get_seq_length(self, layer_idx=0):
