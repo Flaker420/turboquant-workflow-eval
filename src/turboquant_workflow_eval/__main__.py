@@ -104,6 +104,7 @@ _PER_POLICY_KNOBS: list[tuple[str, str, Any]] = [
     ("key-strategy", "key_strategy", str),
     ("value-strategy", "value_strategy", str),
     ("compressible-layers", "compressible_layers", parse_int_list),
+    ("compressible-heads", "compressible_heads", parse_int_list),
     ("profile", "profile", str),
 ]
 
@@ -262,6 +263,12 @@ def _build_parser() -> argparse.ArgumentParser:
                    metavar="3,7,11,...",
                    help="Override PolicySettings.compressible_layers on every policy "
                         "(comma-separated integer indices).")
+    g.add_argument("--compressible-heads", type=parse_int_list, default=None,
+                   metavar="0,2,...",
+                   help="Override PolicySettings.compressible_heads on every policy "
+                        "(comma-separated KV-head indices). Runtime wiring is "
+                        "pending: supported by Qwen*KVBackend directly; "
+                        "prepare_model raises NotImplementedError when set.")
     g.add_argument("--profile", default=None,
                    help="Override PolicySettings.profile on every policy.")
 
@@ -279,32 +286,46 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # --- Runtime knobs ---
     r = parser.add_argument_group("runtime")
-    r.add_argument("--max-input-tokens", type=int, default=None)
-    r.add_argument("--max-new-tokens", type=int, default=None)
-    r.add_argument("--temperature", type=float, default=None)
-    r.add_argument("--top-p", type=float, default=None)
-    r.add_argument("--repetitions", type=int, default=None)
+    r.add_argument("--max-input-tokens", type=int, default=None,
+                   help="Override runtime.max_input_tokens.")
+    r.add_argument("--max-new-tokens", type=int, default=None,
+                   help="Override runtime.max_new_tokens.")
+    r.add_argument("--temperature", type=float, default=None,
+                   help="Override runtime.temperature.")
+    r.add_argument("--top-p", type=float, default=None,
+                   help="Override runtime.top_p.")
+    r.add_argument("--repetitions", type=int, default=None,
+                   help="Override runtime.repetitions.")
     r.add_argument("--no-cache", action="store_true",
                    help="Set runtime.use_cache=False.")
     r.add_argument("--shuffle-policies", action="store_true",
                    help="Set runtime.shuffle_policies=True.")
-    r.add_argument("--shuffle-seed", type=int, default=None)
+    r.add_argument("--shuffle-seed", type=int, default=None,
+                   help="Override runtime.shuffle_seed.")
     r.add_argument("--baseline-policy", default=None,
                    help="Override study.baseline_policy_name.")
 
     # --- Threshold knobs ---
     t = parser.add_argument_group("thresholds")
-    t.add_argument("--latency-yellow-pct", type=float, default=None)
-    t.add_argument("--latency-red-pct", type=float, default=None)
-    t.add_argument("--similarity-yellow", type=float, default=None)
-    t.add_argument("--similarity-red", type=float, default=None)
-    t.add_argument("--output-length-yellow-pct", type=float, default=None)
-    t.add_argument("--output-length-red-pct", type=float, default=None)
+    t.add_argument("--latency-yellow-pct", type=float, default=None,
+                   help="Override thresholds.latency_yellow_pct.")
+    t.add_argument("--latency-red-pct", type=float, default=None,
+                   help="Override thresholds.latency_red_pct.")
+    t.add_argument("--similarity-yellow", type=float, default=None,
+                   help="Override thresholds.similarity_yellow.")
+    t.add_argument("--similarity-red", type=float, default=None,
+                   help="Override thresholds.similarity_red.")
+    t.add_argument("--output-length-yellow-pct", type=float, default=None,
+                   help="Override thresholds.output_length_yellow_pct.")
+    t.add_argument("--output-length-red-pct", type=float, default=None,
+                   help="Override thresholds.output_length_red_pct.")
 
     # --- Early-stop knobs ---
     e = parser.add_argument_group("early stop")
-    e.add_argument("--max-red-verdicts", type=int, default=None)
-    e.add_argument("--max-error-rate", type=float, default=None)
+    e.add_argument("--max-red-verdicts", type=int, default=None,
+                   help="Override early_stop.max_red_verdicts.")
+    e.add_argument("--max-error-rate", type=float, default=None,
+                   help="Override early_stop.max_error_rate.")
 
     # --- Escape hatches ---
     parser.add_argument(
@@ -370,6 +391,8 @@ def _apply_overrides(study: StudyConfig, args: argparse.Namespace) -> StudyConfi
         settings_updates["value_strategy"] = args.value_strategy
     if args.compressible_layers is not None:
         settings_updates["compressible_layers"] = args.compressible_layers
+    if args.compressible_heads is not None:
+        settings_updates["compressible_heads"] = args.compressible_heads
     if args.profile is not None:
         settings_updates["profile"] = args.profile
     study = _apply_global_settings_overrides(study, settings_updates)

@@ -77,6 +77,16 @@ class TurboQuantAdapter:
         compressible_layers = settings.get("compressible_layers")
         if compressible_layers is not None:
             compressible_layers = list(compressible_layers)
+        compressible_heads = settings.get("compressible_heads")
+        if compressible_heads is not None:
+            raise NotImplementedError(
+                "compressible_heads is supported at the Qwen*KVBackend "
+                "class level (see vendor/turboquant-core/tests/test_core.py "
+                "test_compressible_heads_*), but runtime integration through "
+                "TQQuantizedCache + qwen_hook is not yet wired. Unset this "
+                "field, or construct a Qwen*KVBackend directly for offline "
+                "studies."
+            )
 
         self._bit_width = bit_width
         self._seed = seed
@@ -114,6 +124,9 @@ class TurboQuantAdapter:
         compressible_layers = settings.get("compressible_layers")
         if compressible_layers is not None:
             compressible_layers = sorted(int(i) for i in compressible_layers)
+        compressible_heads = settings.get("compressible_heads")
+        if compressible_heads is not None:
+            compressible_heads = sorted(int(i) for i in compressible_heads)
         return {
             "adapter": self.name,
             "bit_width": settings.get("bit_width", 4),
@@ -122,6 +135,7 @@ class TurboQuantAdapter:
             "key_strategy": settings.get("key_strategy", "mse+qjl"),
             "value_strategy": settings.get("value_strategy", "mse"),
             "compressible_layers": compressible_layers,
+            "compressible_heads": compressible_heads,
         }
 
     def can_revert(self) -> bool:
