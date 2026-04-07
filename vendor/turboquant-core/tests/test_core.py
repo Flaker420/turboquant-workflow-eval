@@ -796,6 +796,37 @@ def test_cache_heads_compute_attention_shape_and_finite():
     assert not torch.isinf(out).any()
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(),
+                    reason="requires CUDA for generator-device check")
+def test_qjl_projection_constructs_on_cuda():
+    """Regression: QJLProjection.__init__ must accept device=cuda
+    without the generator-device mismatch RuntimeError that
+    torch.Generator() (CPU default) used to trigger.
+    """
+    from turboquant_core.core import QJLProjection
+    proj = QJLProjection(128, seed=42, device=torch.device("cuda"))
+    assert proj.S.device.type == "cuda"
+    assert proj.S.shape == (128, 128)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(),
+                    reason="requires CUDA for generator-device check")
+def test_cache_constructs_on_cuda_with_qjl():
+    """Regression: TQQuantizedCache(device=cuda, key_strategy='mse+qjl')
+    must construct (drives the QJLProjection CUDA path through the
+    real call site that the harness uses).
+    """
+    cache = TQQuantizedCache(
+        num_layers=4, interval=1,
+        kv_head_dim=128, num_kv_heads=8,
+        bit_width=4, seed=42,
+        device=torch.device("cuda"),
+        key_strategy="mse+qjl",
+    )
+    assert cache.k_qjl is not None
+    assert cache.k_qjl.S.device.type == "cuda"
+
+
 def test_cache_heads_qjl_correction_matches_full():
     """With an all-heads mask, per-head + mse+qjl must numerically match
     the legacy full-head + mse+qjl path."""
@@ -993,6 +1024,8 @@ if __name__ == "__main__":
         test_cache_heads_validation_rejects_duplicates,
         test_cache_heads_update_stores_mask,
         test_cache_heads_compute_attention_shape_and_finite,
+        test_qjl_projection_constructs_on_cuda,
+        test_cache_constructs_on_cuda_with_qjl,
         test_cache_heads_qjl_correction_matches_full,
         test_cache_heads_qjl_correction_finite,
         test_cache_heads_complement_exact_vs_reference,
