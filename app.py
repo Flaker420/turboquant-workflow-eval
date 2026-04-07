@@ -1,19 +1,4 @@
-"""Gradio UI for TurboQuant Workflow Eval.
-
-DEPRECATED — DO NOT LAUNCH FROM THIS COMMIT.
-
-This module loads the legacy ``configs/**/*.yaml`` files and the
-``turboquant_workflow_eval.config`` helpers, both of which were removed
-in the dataclass migration. The Gradio UI rework lands in the next PR
-and will replace every YAML touchpoint with the new ``schema.py`` /
-``loader.py`` surface (and add a UI for the new ``compressible_layers``
-knob). Until that lands, importing this module will fail at the
-top-level ``from turboquant_workflow_eval.config import …`` lines and
-the Gradio app will not launch.
-
-This is an intentional, scoped breakage approved by the maintainer to
-keep the dataclass-migration PR focused. See PR #34 follow-up.
-"""
+"""Gradio UI for TurboQuant Workflow Eval."""
 
 from __future__ import annotations
 
@@ -22,20 +7,35 @@ import gc
 import json
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import gradio as gr
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
-from turboquant_workflow_eval.config import load_yaml, resolve_relative_path
+from turboquant_workflow_eval.__main__ import (
+    apply_set_policy_overrides,
+    parse_int_list,
+)
 from turboquant_workflow_eval.download import (
     check_cache_status,
     discover_model_configs,
     download_one,
     format_summary_table,
 )
+from turboquant_workflow_eval.loader import (
+    load_model_module,
+    load_policy_module,
+    load_study_module,
+)
 from turboquant_workflow_eval.prompts import filter_prompts, load_prompt_pack, load_prompt_source
+from turboquant_workflow_eval.schema import (
+    ModelConfig,
+    PolicyConfig,
+    PolicySettings,
+    StudyConfig,
+)
 from turboquant_workflow_eval.scoring import _DEFAULT_THRESHOLDS
 
 # ---------------------------------------------------------------------------
@@ -58,16 +58,27 @@ _state: dict = {
 _PROJECT_ROOT = Path(__file__).resolve().parent
 
 
+def _discover_py_configs(subdir: str) -> list[str]:
+    root = _PROJECT_ROOT / "configs" / subdir
+    if not root.exists():
+        return []
+    return sorted(
+        str(p)
+        for p in root.glob("*.py")
+        if not p.name.startswith("_")
+    )
+
+
 def _discover_model_config_paths() -> list[str]:
-    return sorted(str(p) for p in (_PROJECT_ROOT / "configs" / "model").glob("*.yaml"))
+    return _discover_py_configs("model")
 
 
 def _discover_policy_config_paths() -> list[str]:
-    return sorted(str(p) for p in (_PROJECT_ROOT / "configs" / "policies").glob("*.yaml"))
+    return _discover_py_configs("policies")
 
 
 def _discover_study_config_paths() -> list[str]:
-    return sorted(str(p) for p in (_PROJECT_ROOT / "configs" / "studies").glob("*.yaml"))
+    return _discover_py_configs("studies")
 
 
 def _discover_output_dirs() -> list[str]:
@@ -158,10 +169,10 @@ def validate_environment():
 def check_model_cache(model_config_path):
     if not model_config_path:
         return "Select a model config first."
-    cfg = load_yaml(model_config_path)
-    status = check_cache_status(cfg["model_name"])
+    model_cfg: ModelConfig = load_model_module(model_config_path)
+    status = check_cache_status(model_cfg.model_name)
     lines = [
-        f"Model: {cfg['model_name']}",
+        f"Model: {model_cfg.model_name}",
         f"Model cached: {status['model_cached']}",
         f"Tokenizer cached: {status['tokenizer_cached']}",
     ]
@@ -171,8 +182,10 @@ def check_model_cache(model_config_path):
 def download_model(model_config_path):
     if not model_config_path:
         return "Select a model config first."
-    cfg = load_yaml(model_config_path)
-    result = download_one(cfg)
+    from turboquant_workflow_eval.schema import model_to_legacy_dict
+
+    model_cfg = load_model_module(model_config_path)
+    result = download_one(model_to_legacy_dict(model_cfg))
     return format_summary_table([result])
 
 
@@ -192,7 +205,7 @@ def build_env_tab():
         model_dd = gr.Dropdown(
             choices=model_configs,
             label="Model Config",
-            info="Select a model config YAML",
+            info="Select a model config Python module",
         )
         with gr.Row():
             cache_btn = gr.Button("Check Cache")
@@ -219,9 +232,12 @@ def load_model(model_config_path):
         load_model_and_tokenizer,
         resolve_language_model_root,
     )
+    from turboquant_workflow_eval.schema import model_to_legacy_dict
 
-    cfg = load_yaml(model_config_path)
-    model, tokenizer, loader_name = load_model_and_tokenizer(cfg)
+    model_cfg: ModelConfig = load_model_module(model_config_path)
+    model, tokenizer, loader_name = load_model_and_tokenizer(
+        model_to_legacy_dict(model_cfg)
+    )
     lm_root = resolve_language_model_root(model)
     device = infer_model_device(model)
 
@@ -229,16 +245,16 @@ def load_model(model_config_path):
         model=model,
         tokenizer=tokenizer,
         loader_name=loader_name,
-        model_cfg=cfg,
+        model_cfg=model_cfg,
         lm_root=lm_root,
         attention_blocks=None,
     )
 
     info = (
-        f"Model: {cfg['model_name']}\n"
+        f"Model: {model_cfg.model_name}\n"
         f"Loader: {loader_name}\n"
         f"Device: {device}\n"
-        f"Dtype: {cfg.get('dtype', 'unknown')}"
+        f"Dtype: {model_cfg.dtype}"
     )
     return info, None
 
@@ -249,8 +265,12 @@ def discover_blocks():
 
     from turboquant_workflow_eval.module_discovery import discover_attention_blocks
 
-    cfg = _state["model_cfg"] or {}
-    expected = cfg.get("layout", {}).get("attention_blocks")
+    model_cfg: ModelConfig | None = _state["model_cfg"]
+    expected = (
+        model_cfg.layout.attention_blocks
+        if model_cfg is not None and model_cfg.layout is not None
+        else None
+    )
     blocks = discover_attention_blocks(_state["lm_root"], expected_count=expected)
     _state["attention_blocks"] = blocks
 
@@ -296,7 +316,7 @@ def build_inspect_tab():
         model_dd = gr.Dropdown(
             choices=model_configs,
             label="Model Config",
-            info="Select a model config YAML",
+            info="Select a model config Python module",
         )
         with gr.Row():
             load_btn = gr.Button("Load Model", variant="primary")
@@ -334,8 +354,12 @@ def run_preflight_ui(max_length, use_cache, progress=gr.Progress()):
     progress(0, desc="Preparing preflight...")
 
     if _state["attention_blocks"] is None:
-        cfg = _state["model_cfg"] or {}
-        expected = cfg.get("layout", {}).get("attention_blocks")
+        model_cfg: ModelConfig | None = _state["model_cfg"]
+        expected = (
+            model_cfg.layout.attention_blocks
+            if model_cfg is not None and model_cfg.layout is not None
+            else None
+        )
         _state["attention_blocks"] = discover_attention_blocks(_state["lm_root"], expected_count=expected)
 
     progress(0.2, desc="Running preflight instrumentation...")
@@ -386,36 +410,61 @@ def build_preflight_tab():
 # ---------------------------------------------------------------------------
 
 
+def _default_policy_paths_for(study: StudyConfig) -> list[str]:
+    """Pre-select the policy-module files whose POLICY.name matches this
+    study's ``policies``.
+
+    The new dataclass schema stores fully-loaded :class:`PolicyConfig`
+    instances in ``study.policies`` rather than round-trippable paths, so
+    we match by name against the discovered ``configs/policies/*.py``
+    files. Any loose files that don't match are still offered in the
+    checkbox as additional choices.
+    """
+    wanted = {p.name for p in study.policies}
+    all_paths = _discover_policy_config_paths()
+    selected: list[str] = []
+    for path in all_paths:
+        try:
+            p = load_policy_module(path)
+        except Exception:
+            continue
+        if p.name in wanted:
+            selected.append(path)
+    return selected
+
+
 def load_study_policies(study_config_path):
-    """Return the policy config paths referenced by the study config."""
+    """Populate the Policy Configs checkbox with the study's defaults."""
     if not study_config_path:
         return gr.update(choices=[], value=[])
-    cfg = load_yaml(study_config_path)
-    policies = []
-    for item in cfg.get("policy_configs", []):
-        resolved = resolve_relative_path(study_config_path, item)
-        policies.append(str(resolved))
-    return gr.update(choices=policies, value=policies)
+    try:
+        study = load_study_module(study_config_path)
+    except Exception:
+        return gr.update(choices=[], value=[])
+    defaults = _default_policy_paths_for(study)
+    all_paths = _discover_policy_config_paths()
+    # Offer every discovered policy module as a choice; pre-select the ones
+    # this study already declares.
+    return gr.update(choices=all_paths, value=defaults)
 
 
 def load_prompt_pack_info(study_config_path):
-    """Load and summarise the prompt pack referenced by a study config."""
+    """Load and summarise the prompt pack(s) referenced by a study module."""
     if not study_config_path:
         return "", None
     try:
-        cfg = load_yaml(study_config_path)
-        prompt_pack_cfg = cfg["prompt_pack"]
-        if isinstance(prompt_pack_cfg, list):
-            prompts = []
-            for pp in prompt_pack_cfg:
-                try:
-                    prompts.extend(load_prompt_pack(resolve_relative_path(study_config_path, pp)))
-                except FileNotFoundError:
-                    pass
-        else:
-            prompts = load_prompt_pack(resolve_relative_path(study_config_path, prompt_pack_cfg))
+        study = load_study_module(study_config_path)
     except Exception as exc:
-        return f"Error loading prompt pack: {exc}", None
+        return f"Error loading study config: {exc}", None
+
+    prompts = []
+    for pp_path in study.prompt_pack:
+        try:
+            prompts.extend(load_prompt_pack(pp_path))
+        except FileNotFoundError:
+            pass
+        except Exception as exc:
+            return f"Error loading prompt pack {pp_path}: {exc}", None
 
     categories = {}
     for p in prompts:
@@ -441,6 +490,7 @@ _study_controller = None
 
 def run_study_ui(study_config_path, policy_paths, output_dir,
                  repetitions, temperature, max_new_tokens, shuffle_policies,
+                 compressible_layers_text,
                  model_config_override,
                  prompt_category_filter, prompt_id_filter,
                  policy_overrides_text="",
@@ -455,31 +505,81 @@ def run_study_ui(study_config_path, policy_paths, output_dir,
     from turboquant_workflow_eval.study import StudyController, run_workflow_study
 
     output_dir = output_dir.strip() or "outputs/study_run"
-    policy_arg = ",".join(policy_paths)
 
-    # Build runtime overrides from non-default UI values
-    overrides: dict = {}
+    # --- Load the study as a dataclass and apply UI overrides on top ----
+    try:
+        study: StudyConfig = load_study_module(study_config_path)
+    except Exception as exc:
+        return f"Failed to load study config: {exc}", None, ""
+
+    # 1. --model override: swap the entire model field.
+    if model_config_override:
+        try:
+            study = replace(study, model=load_model_module(model_config_override))
+        except Exception as exc:
+            return f"Failed to load model override: {exc}", None, ""
+
+    # 2. --policies override: rebuild study.policies from the checkbox selection.
+    try:
+        new_policies = tuple(load_policy_module(p) for p in policy_paths)
+    except Exception as exc:
+        return f"Failed to load a selected policy: {exc}", None, ""
+    # Preserve baseline_policy_name if still represented; otherwise reset to
+    # the first selected policy (StudyConfig's __post_init__ enforces this
+    # invariant for multi-policy studies).
+    new_names = {p.name for p in new_policies}
+    new_baseline = (
+        study.baseline_policy_name
+        if study.baseline_policy_name in new_names
+        else new_policies[0].name
+    )
+    study = replace(study, policies=new_policies, baseline_policy_name=new_baseline)
+
+    # 3. Runtime overrides from the accordion widgets.
+    runtime_updates: dict = {}
     if repetitions is not None and repetitions > 0:
-        overrides["repetitions"] = int(repetitions)
+        runtime_updates["repetitions"] = int(repetitions)
     if temperature is not None and temperature >= 0:
-        overrides["temperature"] = float(temperature)
+        runtime_updates["temperature"] = float(temperature)
     if max_new_tokens is not None and max_new_tokens > 0:
-        overrides["max_new_tokens"] = int(max_new_tokens)
+        runtime_updates["max_new_tokens"] = int(max_new_tokens)
     if shuffle_policies:
-        overrides["shuffle_policies"] = True
+        runtime_updates["shuffle_policies"] = True
+    if runtime_updates:
+        study = replace(study, runtime=replace(study.runtime, **runtime_updates))
 
-    # Prompt filtering
-    prompt_cats = [c.strip() for c in (prompt_category_filter or "").split(",") if c.strip()] or None
-    prompt_ids = [i.strip() for i in (prompt_id_filter or "").split(",") if i.strip()] or None
+    # 4. Global compressible_layers textbox — applies to every policy.
+    cl_text = (compressible_layers_text or "").strip()
+    if cl_text:
+        try:
+            cl = parse_int_list(cl_text)
+        except Exception as exc:
+            return f"Invalid compressible_layers {cl_text!r}: {exc}", None, ""
+        new_pols = tuple(
+            replace(p, settings=replace(p.settings, compressible_layers=cl))
+            for p in study.policies
+        )
+        study = replace(study, policies=new_pols)
 
-    # Policy overrides (one per line in the UI textbox)
-    policy_overrides = [
+    # 5. Free-form policy overrides textbox (one NAME.DOT.KEY=VALUE per line).
+    override_lines = [
         line.strip()
         for line in (policy_overrides_text or "").splitlines()
         if line.strip() and not line.strip().startswith("#")
-    ] or None
+    ]
+    if override_lines:
+        try:
+            study = apply_set_policy_overrides(study, override_lines)
+        except SystemExit as exc:  # helper raises SystemExit for CLI parity
+            return f"Policy override error: {exc}", None, ""
+        except Exception as exc:
+            return f"Policy override error: {exc}", None, ""
 
-    # Event bus + controller for live tracking
+    # --- Prompt filtering (orthogonal to the dataclass) ----
+    prompt_cats = [c.strip() for c in (prompt_category_filter or "").split(",") if c.strip()] or None
+    prompt_ids = [i.strip() for i in (prompt_id_filter or "").split(",") if i.strip()] or None
+
+    # --- Event bus + controller for live tracking ----
     event_bus = EventBus()
     _study_controller = StudyController(event_bus=event_bus)
     completed_prompts = []
@@ -497,17 +597,14 @@ def run_study_ui(study_config_path, policy_paths, output_dir,
 
     try:
         summary = run_workflow_study(
-            study_config_path=study_config_path,
+            study,
             output_dir=output_dir,
-            policy_configs_arg=policy_arg,
-            runtime_overrides=overrides or None,
             progress_callback=_progress_cb,
-            model_config_override=model_config_override or None,
-            policy_overrides=policy_overrides,
             prompt_ids=prompt_ids,
             prompt_categories=prompt_cats,
             event_bus=event_bus,
             controller=_study_controller,
+            study_config_path=study_config_path,
         )
         progress(1.0, desc="Complete")
 
@@ -553,12 +650,12 @@ def build_study_tab():
 
         study_configs = _discover_study_config_paths()
         default_study = study_configs[0] if study_configs else None
+        all_policy_paths = _discover_policy_config_paths()
         default_policies: list[str] = []
         if default_study:
             try:
-                _cfg = load_yaml(default_study)
-                for _item in _cfg.get("policy_configs", []):
-                    default_policies.append(str(resolve_relative_path(default_study, _item)))
+                _study = load_study_module(default_study)
+                default_policies = _default_policy_paths_for(_study)
             except Exception:
                 pass
 
@@ -566,11 +663,11 @@ def build_study_tab():
             choices=study_configs,
             value=default_study,
             label="Study Config",
-            info="Select a study config YAML",
+            info="Select a study config Python module",
         )
 
         policy_cb = gr.CheckboxGroup(
-            choices=default_policies,
+            choices=all_policy_paths,
             value=default_policies,
             label="Policy Configs",
             info="Policies to evaluate (auto-populated from study config)",
@@ -598,16 +695,30 @@ def build_study_tab():
                 temperature = gr.Number(label="Temperature")
                 max_new_tokens = gr.Number(label="Max New Tokens", precision=0)
             shuffle_policies = gr.Checkbox(label="Shuffle policy order", value=False)
+            compressible_layers_box = gr.Textbox(
+                label="Compressible layers",
+                placeholder="e.g. 7,15,23,31 (blank = backend default)",
+                info=(
+                    "Comma-separated layer indices applied to every policy's "
+                    "PolicySettings.compressible_layers. Blank uses the "
+                    "backend default (Qwen3.5: every 4th layer; dense backends: "
+                    "all layers). For per-policy targeting, use the Policy "
+                    "Overrides accordion below."
+                ),
+            )
 
         with gr.Accordion("Policy Overrides", open=False):
             gr.Markdown(
-                "Override keys inside policy YAMLs at load time. One override per line. "
+                "Override fields on a specific policy at run time. One override per line. "
                 "Format: `<policy_name|*>.<dot.key>=<value>`. The first segment matches "
-                "`policy_cfg['name']`; `*` matches every policy.\n\n"
+                "`PolicyConfig.name`; `*` matches every policy. Overrides are applied via "
+                "`schema.replace_path`, so `__post_init__` re-validates the result and any "
+                "invalid value fails fast.\n\n"
                 "Examples:\n"
                 "```\n"
                 "turboquant_safe.settings.key_strategy=mse\n"
                 "*.settings.bit_width=8\n"
+                "turboquant_safe.settings.compressible_layers=7,15,23,31\n"
                 "baseline.enabled=false\n"
                 "```"
             )
@@ -668,6 +779,7 @@ def build_study_tab():
             fn=run_study_ui,
             inputs=[study_dd, policy_cb, output_dir,
                     repetitions, temperature, max_new_tokens, shuffle_policies,
+                    compressible_layers_box,
                     model_override_dd,
                     prompt_category_filter, prompt_id_filter,
                     policy_overrides_box],
@@ -799,21 +911,20 @@ def build_results_tab():
 
 
 def _load_prompt_choices():
-    """Load prompts from all available prompt packs for the quick-test dropdown."""
+    """Load prompts from every discovered study module for the quick-test dropdown."""
     prompts = []
-    for study_path in (_PROJECT_ROOT / "configs" / "studies").glob("*.yaml"):
+    for study_path in (_PROJECT_ROOT / "configs" / "studies").glob("*.py"):
+        if study_path.name.startswith("_"):
+            continue
         try:
-            cfg = load_yaml(study_path)
-            pp_cfg = cfg.get("prompt_pack")
-            if not pp_cfg:
-                continue
-            if isinstance(pp_cfg, list):
-                for pp in pp_cfg:
-                    prompts.extend(load_prompt_pack(resolve_relative_path(study_path, pp)))
-            else:
-                prompts.extend(load_prompt_pack(resolve_relative_path(study_path, pp_cfg)))
+            study = load_study_module(study_path)
         except Exception:
             continue
+        for pp_path in study.prompt_pack:
+            try:
+                prompts.extend(load_prompt_pack(pp_path))
+            except Exception:
+                continue
     # Deduplicate by id
     seen = set()
     unique = []
@@ -837,11 +948,15 @@ def run_quick_test(
 
     from turboquant_workflow_eval.generation import generate_one
     from turboquant_workflow_eval.import_utils import load_object
+    from turboquant_workflow_eval.schema import (
+        model_to_legacy_dict,
+        policy_to_legacy_dict,
+    )
     from turboquant_workflow_eval.scoring import check_reference_answer, compute_verdict
 
     model = _state["model"]
     tokenizer = _state["tokenizer"]
-    model_cfg = _state["model_cfg"] or {}
+    model_cfg: ModelConfig | None = _state["model_cfg"]
 
     # Resolve prompt
     prompt_text = custom_prompt.strip() if custom_prompt.strip() else None
@@ -854,14 +969,26 @@ def run_quick_test(
     if not prompt_text:
         return "Enter a prompt or select one from the dropdown.", "", None
 
-    # Load and apply adapter
-    policy_cfg = load_yaml(policy_path) if policy_path else {"name": "quick-test", "adapter": None, "enabled": True}
+    # Load and apply adapter. When no policy is selected we fall back to the
+    # pass-through baseline policy (no quantization) so the Quick Test tab
+    # can run without forcing the user to pick one.
     adapter = None
-    if policy_cfg.get("adapter"):
+    if policy_path:
         try:
-            adapter_cls = load_object(policy_cfg["adapter"]["import_path"])
+            policy = load_policy_module(policy_path)
+        except Exception as exc:
+            return f"Failed to load policy: {exc}", "", None
+        try:
+            adapter_cls = load_object(policy.adapter.import_path)
             adapter = adapter_cls()
-            model, tokenizer = adapter.prepare_model(model, tokenizer, model_cfg, policy_cfg)
+            if model_cfg is None:
+                return "Model config is missing from shared state.", "", None
+            model, tokenizer = adapter.prepare_model(
+                model,
+                tokenizer,
+                model_to_legacy_dict(model_cfg),
+                policy_to_legacy_dict(policy),
+            )
         except Exception as exc:
             return f"Adapter failed: {exc}", "", None
 
