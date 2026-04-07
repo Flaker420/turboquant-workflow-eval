@@ -458,6 +458,12 @@ def _gqa_attention(Q, cache, layer_idx, num_q_heads, num_kv_heads,
     K_mse_expanded = _expand_kv_for_gqa(
         K_mse, num_kv_heads, num_groups, bsz, compressed_len, head_dim,
     )
+    # tq_dequantize_mse (and _reconstruct_full_kv, which calls it) returns
+    # float32, but Q preserves the model dtype (bfloat16 on Qwen2.5). Cast
+    # the reconstructed K to Q's dtype so the Q @ K^T matmul below doesn't
+    # raise "expected scalar type BFloat16 but found Float". V is cast
+    # below, after V_compressed is populated on both branches.
+    K_mse_expanded = K_mse_expanded.to(Q.dtype)
     scores_mse = Q @ K_mse_expanded.transpose(-2, -1)
 
     if cache.key_strategy == "mse+qjl" and not per_head_enabled:
@@ -534,6 +540,10 @@ def _gqa_attention(Q, cache, layer_idx, num_q_heads, num_kv_heads,
     V_compressed_expanded = _expand_kv_for_gqa(
         V_compressed, num_kv_heads, num_groups, bsz, compressed_len, head_dim,
     )
+    # Same float32 -> model-dtype fix-up as for K above: V comes out of
+    # tq_dequantize_mse / _reconstruct_full_kv in float32, but the softmax
+    # output (attn) will be in Q.dtype, so attn @ V would dtype-mismatch.
+    V_compressed_expanded = V_compressed_expanded.to(Q.dtype)
 
     if has_window:
         # Combine compressed scores with FP16 window scores
