@@ -17,7 +17,6 @@ from turboquant_workflow_eval.schema import (
     PolicySettings,
     RuntimeConfig,
     StudyConfig,
-    ThresholdsConfig,
     model_to_legacy_dict,
     policy_to_legacy_dict,
     replace_path,

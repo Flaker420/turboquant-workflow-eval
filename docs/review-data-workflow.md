@@ -166,40 +166,74 @@ artefact types:
 
 This is a well-designed set of outputs for a manual review workflow.
 
-### 3.2 Automated Evaluation (implemented as of PRs #8–#10)
+### 3.2 Automated Evaluation (rewritten in the divergence-metrics PR)
 
-The evaluation layer originally identified as absent has been implemented:
+The evaluation layer originally landed as a green/yellow/red verdict
+aggregator over latency, semantic-similarity, math, and code-runner
+signals. That aggregator was deleted in the divergence-metrics rewrite
+(commit `90fb869` and follow-ups) because it was measuring the wrong
+thing for this project: a turboquant policy whose generated tokens were
+byte-identical to baseline could still be flagged "yellow" on latency
+jitter alone. The current scoring layer captures two direct metric
+families instead -- both computed in the post-hoc `score_results` join,
+both unit-tested torch-free:
 
-- **Math reference-answer checking.** `scoring.py:check_reference_answer()`
-  extracts numbers from model output and compares them against the
-  `reference_answer` field on each prompt with configurable tolerance (default
-  5% relative). Results appear as `math_correct` in the output rows.
+- **Token-level divergence vs baseline.** `scoring.py:compute_divergence`
+  (lines 175–206) compares each non-baseline row's `output_token_ids`
+  against the baseline row for the same prompt and returns
+  `exact_match`, `first_divergence_token`, `common_prefix_tokens`,
+  `common_prefix_frac`, `token_edit_distance` (plain O(n*m) Levenshtein
+  on token IDs), and `output_length_delta_tokens`. Sentinel
+  `first_divergence_token == -1` is reserved for the baseline row
+  itself; sequences that are strict prefixes of one another return
+  `first_divergence_token == min(len(policy), len(baseline))`.
 
-- **Code execution for coding prompts.** `code_runner.py` extracts Python code
-  blocks from model output and runs them against `test_cases` defined in the
-  prompt YAML. Results include `code_passed`, `code_failed`, `code_errors`,
-  and a `code_verdict` (pass / fail / error).
+- **Theoretical KV-cache compression bytes.**
+  `scoring.py:compute_kv_cache_bytes` (lines 237–320) is a pure-Python
+  helper that takes the per-row policy knobs (`bit_width`,
+  `residual_window`, `compressible_layers`, `compressible_heads`,
+  `key_strategy`, `value_strategy`) plus model topology
+  (`num_hidden_layers`, `num_key_value_heads`, `head_dim`) and the
+  per-row `prompt_tokens + output_tokens` count, and returns
+  `kv_cache_bytes_baseline`, `kv_cache_bytes_policy`,
+  `kv_cache_compression_ratio`, and `kv_cache_bytes_saved`. Per-element
+  cost is modelled as `bit_width / 8` so future bit-packing work
+  plugs into the same accounting helper without changing callers.
+  `key_strategy == "mse+qjl"` adds a crude one-byte-per-compressed-K-token
+  side-channel overhead.
 
-- **Semantic similarity.** `scoring.py:compute_semantic_similarity()` uses
-  sentence-transformers (optional dependency) to compute cosine similarity
-  between baseline and compressed outputs. The score appears as
-  `semantic_similarity` in the output rows.
+- **Pareto summary.** `reporting.py:summarize_divergence` (lines
+  275–323) folds the per-row metrics into a per-policy
+  `divergence_summary` block in `run_summary.json` -- exact-match
+  count/rate, mean common-prefix fraction, mean / max edit distance,
+  mean compression ratio, mean bytes saved. The next PR can plot
+  `(exact_match_rate, mean_kv_cache_compression_ratio)` straight off
+  this block.
 
-- **Output-length delta.** `study.py:199–202` computes
-  `output_length_delta_pct` for each row relative to the baseline policy.
+The legacy `extract_numbers`, `check_reference_answer`, and
+`compute_semantic_similarity` helpers still live in `scoring.py` for
+diagnostic side-channels but no longer drive any row-level decision;
+the math and code-runner helpers are similarly available but not wired
+into the post-hoc scoring path.
 
-- **Configurable green/yellow/red verdict system.**
-  `scoring.py:compute_verdict()` aggregates latency regression, output-length
-  delta, semantic similarity, math correctness, and code execution results
-  into a single `verdict` per row. Thresholds are configurable in the study
-  config (`configs/studies/default_qwen35_9b.py:19–25`).
+**Backbone for these metrics**:
+[`vendor/turboquant-core/docs/algorithm-comparison.md`](../vendor/turboquant-core/docs/algorithm-comparison.md)
+§"PR1: Algorithmic Ablation Matrix" / "Measurement discipline" -- the
+audit-of-eight community implementations enumerates exactly the per-row
+bookkeeping any honest ablation must carry (compressed-token count,
+residual-window length, protected-layer policy, honest bytes/token
+including all metadata, end-to-end memory reduction). Every row this
+harness writes carries that bookkeeping by construction.
 
 **Remaining gaps:**
 
-- Reasoning and retrieval prompts still lack reference outputs and require
-  human review of `examples.md` and `watch_for` annotations.
-- No automated text diff between baseline and compressed outputs beyond the
-  semantic similarity score.
+- Reasoning and retrieval prompts still lack reference outputs and
+  require human review of `examples.md` and `watch_for` annotations
+  alongside the divergence numbers.
+- The harness has no long-context prompts in the default pack, so
+  realistic compression ratios (where the residual window can no
+  longer cover the whole sequence) are not yet exercised. This is the
+  next PR.
 
 ---
 
@@ -229,11 +263,11 @@ logic** or the **evaluation methodology**.
 
 **Can the current harness answer this?**
 
-| Aspect                  | Verdict | Explanation |
-|-------------------------|---------|-------------|
-| "Which policy is usable" | Yes | The harness collects performance metrics (latency, VRAM, throughput) and automated quality signals (math correctness, code execution, semantic similarity). The verdict system aggregates these into a green/yellow/red decision per prompt-policy pair. Reasoning and retrieval prompts still require human judgment. |
-| "What degrades"         | Mostly | Automated degradation detection via output-length delta, semantic similarity, and the verdict system. Side-by-side markdown comparison remains available for human review. |
-| "When I push harder"    | Weak | The prompt set does not vary in difficulty or length. There are no long-context, multi-turn, or adversarial prompts that would stress-test compression at its limits. `scripts/generate_prompts.py` exists to create long-context prompts but they are not in the default prompt pack. |
+| Aspect                  | Answer | Explanation |
+|-------------------------|--------|-------------|
+| "Which policy is usable" | Yes | The harness reports `exact_match_rate` and per-row `token_edit_distance` against the baseline policy, plus performance metrics (latency, VRAM, throughput). A policy whose `exact_match_rate` is 1.0 is byte-identical to baseline by definition; lower rates with small mean edit distances indicate localised divergence the human reviewer can read in `examples.md`. Reasoning and retrieval prompts still benefit from human review of `watch_for` annotations alongside the divergence numbers. |
+| "What degrades"         | Yes (for token output) | `first_divergence_token` and `token_edit_distance` describe exactly where and how much each policy's output drifts from baseline. Memory degradation is captured analytically by `kv_cache_compression_ratio` -- 1.0 means the policy fell back to baseline (e.g. residual window covered the whole sequence), values > 1.0 quantify the savings. Side-by-side markdown comparison remains available for human review. |
+| "When I push harder"    | Weak | The prompt set does not vary in difficulty or length. There are no long-context, multi-turn, or adversarial prompts that would stress-test compression at its limits, so `kv_cache_compression_ratio` typically reads ~1.0 on the default pack -- the residual window covers everything. `scripts/generate_prompts.py` exists to create long-context prompts but they are not in the default prompt pack. |
 
 **Overall pertinence: good.** The harness now has a substantive analysis layer
 on top of its data-collection framework. The primary remaining gap is **data
@@ -280,16 +314,28 @@ Ranked by impact-to-effort ratio. Implementation status updated as of PRs
 
 ### Medium Impact, Higher Effort
 
-7. **~~Implement automated semantic comparison.~~** **Done.**
-   `scoring.py:compute_semantic_similarity()` uses sentence-transformers
-   cosine similarity between baseline and compressed outputs. Requires the
-   optional `sentence-transformers` dependency.
+7. **~~Implement automated semantic comparison.~~** **Reverted in the
+   divergence-metrics PR.** `scoring.py:compute_semantic_similarity()` is
+   still in the module for diagnostic side-channels but no longer feeds
+   any row-level decision. Community evidence
+   ([algorithm-comparison.md §"Measurement discipline"](../vendor/turboquant-core/docs/algorithm-comparison.md))
+   indicated that semantic-similarity scoring was the wrong axis when the
+   project's actual goal is byte-identical output -- a fuzzy embedding
+   distance can flag exact matches as "drifted" or vice versa. Replaced
+   by direct token-level divergence
+   (`scoring.py:compute_divergence`, lines 175–206).
 
-8. **~~Implement the green/yellow/red threshold system.~~** **Done.**
-   `scoring.py:compute_verdict()` uses configurable thresholds from the study
-   config (`latency_yellow_pct`, `latency_red_pct`, `similarity_yellow`,
-   `similarity_red`, `output_length_yellow_pct`, `output_length_red_pct`).
-   The `verdict` column appears in all output formats.
+8. **~~Implement the green/yellow/red threshold system.~~** **Reverted in
+   the divergence-metrics PR.** `scoring.py:compute_verdict()` and the
+   accompanying `ThresholdsConfig` dataclass are deleted entirely.
+   Community evidence indicated the verdict aggregator was measuring the
+   wrong thing for byte-identical output runs -- it routinely flagged
+   exact-match policies as "yellow" on latency jitter alone. Replaced by
+   direct token-level divergence + theoretical KV-cache-bytes metrics
+   computed in the post-hoc `score_results` join. See
+   [algorithm-comparison.md §1 "Quantization Core: MSE vs. MSE+QJL" and
+   "Measurement discipline"](../vendor/turboquant-core/docs/algorithm-comparison.md)
+   for the conceptual backbone.
 
 9. **~~Randomize or interleave policy execution order.~~** **Done.**
    `study.py:70–74` implements `shuffle_policies` with a deterministic
@@ -310,13 +356,18 @@ Ranked by impact-to-effort ratio. Implementation status updated as of PRs
 | Prompt coverage        | Insufficient | Too few (14), too short, no long-context stress tests |
 | Measurement quality    | Good         | Correct timing, VRAM tracking, deterministic config |
 | Statistical rigour     | Adequate     | Warmup pass, 3 repetitions with mean/std, optional policy shuffle |
-| Automated evaluation   | Good         | Math checking, code execution, semantic similarity, configurable verdict system |
-| Reporting              | Good         | Multiple formats, clean structure, verdict column in all outputs |
+| Automated evaluation   | Good         | Token-level divergence vs baseline (`exact_match`, `first_divergence_token`, `token_edit_distance`) and theoretical KV-cache compression bytes derived from policy settings -- both computed in the post-hoc `score_results` join |
+| Reporting              | Good         | Multiple formats, clean structure, divergence + KV-cache columns in all outputs, per-policy `divergence_summary` block in `run_summary.json` |
 | Fitness for purpose    | Good         | Strong collection and analysis framework; remaining gap is data coverage |
 
 The harness has matured from a data-collection scaffold into a substantive
-evaluation framework. Recommendations 1–3 and 5–9 have been implemented,
-adding automated quality scoring, statistical repetitions, and a configurable
-verdict system. The primary remaining gap is **data coverage**: the prompt set
-is too small and too short to stress-test the regime where KV-cache compression
-matters most (recommendations 4 and 10).
+evaluation framework. Recommendations 1–6 and 9 are still implemented;
+recommendations 7–8 (semantic similarity scoring and the
+green/yellow/red verdict aggregator) were intentionally **reverted** in
+the divergence-metrics PR after community evidence indicated they were
+measuring the wrong axis for byte-identical output runs -- replaced by
+the direct token-level divergence + KV-cache-bytes metrics described
+above. The primary remaining gap is **data coverage**: the prompt set
+is too small and too short to stress-test the regime where KV-cache
+compression matters most (recommendations 4 and 10), so
+`kv_cache_compression_ratio` typically reads ~1.0 on the default pack.
