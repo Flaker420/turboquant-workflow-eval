@@ -28,7 +28,7 @@ TurboQuant-core backend: `Qwen3DenseKVBackend` -- applies compression uniformly 
 - all layers use standard attention
 - 16 query heads / 2 KV heads (GQA), head_dim 128
 
-TurboQuant-core backend: `Qwen25DenseKVBackend` (hook helper: `patch_qwen25_with_tq`) -- applies compression uniformly across all 36 layers. Keys use TQ_prod quantization, values use TQ_MSE. Config: `configs/model/qwen25_3b.yaml`; bundled study: `configs/studies/default_qwen25_3b.yaml`.
+TurboQuant-core backend: `Qwen25DenseKVBackend` (hook helper: `patch_qwen25_with_tq`) -- applies compression uniformly across all 36 layers. Keys use TQ_prod quantization, values use TQ_MSE. Config: `configs/model/qwen25_3b.py`; bundled study: `configs/studies/default_qwen25_3b.py`.
 
 ## What this means for the evaluation
 

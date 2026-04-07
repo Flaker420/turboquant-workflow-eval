@@ -17,11 +17,11 @@ This repository is the evaluation counterpart to [turboquant-core](https://githu
 
 | Model | Config | turboquant-core backend |
 |-------|--------|------------------------|
-| Qwen3.5-9B | `configs/model/qwen35_9b_text_only.yaml` | `Qwen35KVBackend` |
-| Qwen3-8B | `configs/model/qwen3_8b.yaml` | `Qwen3DenseKVBackend` |
-| Qwen2.5-3B-Instruct | `configs/model/qwen25_3b.yaml` | `Qwen25DenseKVBackend` |
+| Qwen3.5-9B | `configs/model/qwen35_9b_text_only.py` | `Qwen35KVBackend` |
+| Qwen3-8B | `configs/model/qwen3_8b.py` | `Qwen3DenseKVBackend` |
+| Qwen2.5-3B-Instruct | `configs/model/qwen25_3b.py` | `Qwen25DenseKVBackend` |
 
-All three models work with the same evaluation pipeline. Select the model by passing a different `--model-config` to the scripts or by editing the study/experiment config. Bundled study configs: `configs/studies/default_qwen35_9b.yaml` (Qwen3.5-9B), `configs/studies/default_qwen3_8b.yaml`, `configs/studies/default_qwen25_3b.yaml`.
+All three models work with the same evaluation pipeline. Select the model by passing a different `--model-config` to the scripts or by editing the study/experiment config. Bundled study configs: `configs/studies/default_qwen35_9b.py` (Qwen3.5-9B), `configs/studies/default_qwen3_8b.py`, `configs/studies/default_qwen25_3b.py`.
 
 ## Ready-to-run status
 
@@ -32,7 +32,7 @@ The scaffold is **ready to run** for:
 - preflight instrumentation
 - baseline workflow study
 
-It includes a **pluggable adapter interface** and ready-to-use template configs (`safe_template.yaml`, `aggressive_template.yaml`) that use the built-in `TurboQuantAdapter` to delegate to [turboquant-core](https://github.com/Flaker420/turboquant-core). Both templates are enabled by default.
+It includes a **pluggable adapter interface** and ready-to-use template configs (`safe_template.py`, `aggressive_template.py`) that use the built-in `TurboQuantAdapter` to delegate to [turboquant-core](https://github.com/Flaker420/turboquant-core). Both templates are enabled by default.
 
 ## What is built in
 
@@ -77,7 +77,7 @@ To run a compression comparison, no additional wiring is needed -- just run the 
 
 The built-in `TurboQuantAdapter` (`src/turboquant_workflow_eval/adapters/turboquant.py`) wraps the core library's adapter, handling the `model_name` → `name` field normalization between the eval harness and the core library, and validating that `model_name` is set on the model config (raises `ValueError` early if not).
 
-Both `safe_template.yaml` (bit_width 4) and `aggressive_template.yaml` (bit_width 2) are pre-configured and enabled. They forward `bit_width`, `seed`, `residual_window`, and `key_strategy` from `settings:` straight into turboquant-core; all four are recorded in `describe()` and on every result row, so they are visible in `run_summary.json` and the per-row CSV/JSONL outputs. See `docs/adapter-interface.md` for the adapter contract if you need to write a custom adapter.
+Both `safe_template.py` (bit_width 4) and `aggressive_template.py` (bit_width 2) are pre-configured and enabled. They forward `bit_width`, `seed`, `residual_window`, and `key_strategy` from `settings:` straight into turboquant-core; all four are recorded in `describe()` and on every result row, so they are visible in `run_summary.json` and the per-row CSV/JSONL outputs. See `docs/adapter-interface.md` for the adapter contract if you need to write a custom adapter.
 
 ## Study configuration
 
@@ -165,13 +165,13 @@ source /workspace/venvs/turboquant-eval/bin/activate
 To use Qwen3-8B instead of the default Qwen3.5-9B:
 
 ```bash
-bash scripts/bootstrap_runpod.sh --download-model --model-config configs/model/qwen3_8b.yaml
+bash scripts/bootstrap_runpod.sh --download-model --model-config configs/model/qwen3_8b.py
 ```
 
 Or Qwen2.5-3B-Instruct:
 
 ```bash
-bash scripts/bootstrap_runpod.sh --download-model --model-config configs/model/qwen25_3b.yaml
+bash scripts/bootstrap_runpod.sh --download-model --model-config configs/model/qwen25_3b.py
 ```
 
 Alternatively, after bootstrapping, launch the web UI to run the entire workflow from your browser:
@@ -192,7 +192,7 @@ pytest -q
 Before committing GPU hours, verify that all configs, paths, and adapters resolve correctly:
 
 ```bash
-python -m turboquant_workflow_eval --study-config configs/studies/default_qwen35_9b.yaml --dry-run
+python -m turboquant_workflow_eval --study configs/studies/default_qwen35_9b.py --dry-run
 ```
 
 This runs in <1 second and prints an execution plan showing how many prompts, policies, and total generations would run.
@@ -221,7 +221,7 @@ Or with the CLI directly:
 
 ```bash
 python -m turboquant_workflow_eval \
-  --study-config configs/studies/default_qwen35_9b.yaml \
+  --study configs/studies/default_qwen35_9b.py \
   --single --prompt-id math_01
 ```
 
@@ -230,14 +230,14 @@ python -m turboquant_workflow_eval \
 Baseline only:
 
 ```bash
-make study POLICY_CONFIGS=configs/policies/baseline.yaml OUTPUT_DIR=outputs/study_baseline
+make study POLICY_CONFIGS=configs/policies/baseline.py OUTPUT_DIR=outputs/study_baseline
 ```
 
 Baseline plus the built-in safe policy (after wiring a real backend):
 
 ```bash
 make study \
-  POLICY_CONFIGS=configs/policies/baseline.yaml,configs/policies/safe_template.yaml \
+  POLICY_CONFIGS=configs/policies/baseline.py,configs/policies/safe_template.py \
   OUTPUT_DIR=outputs/study_compare
 ```
 
@@ -334,7 +334,7 @@ python scripts/run_preflight_stats.py [--experiment-config PATH] [--output-dir P
 
 ```bash
 python scripts/run_workflow_study.py \
-  [--study-config PATH] [--policy-configs PATH1,PATH2,...] [--output-dir PATH] \
+  [--study PATH] [--policies PATH1,PATH2,...] [--output-dir PATH] \
   [--model-config PATH] \
   [--set KEY=VALUE] [--repetitions N] \
   [--prompt-id ID] [--prompt-category CAT] [--prompt-filter REGEX] \
@@ -347,7 +347,7 @@ python scripts/run_workflow_study.py \
 python scripts/generate_prompts.py [--model-config PATH] [--output PATH] [--max-new-tokens N]
 ```
 
-Generates long-context evaluation prompts using the target model. The output YAML follows the same schema as `prompts/workflow_prompts.yaml` and can be used with `configs/studies/full.yaml`.
+Generates long-context evaluation prompts using the target model. The output YAML follows the same schema as `prompts/workflow_prompts.yaml` and can be used with `configs/studies/full.py`.
 
 ## CLI quick reference
 
@@ -458,7 +458,7 @@ early_stop:
 
 ### Re-scoring
 
-Results can be re-scored with different thresholds using `--rescore` without re-running inference. `--rescore` accepts an optional `--study-config` that supplies a `thresholds:` block as the base, then layers `--set thresholds.<key>=<value>` (or the bare `--set <key>=<value>`) overrides on top. The baseline policy is taken from the sibling `run_summary.json` next to the rows JSONL, falling back to single-policy auto-detection. A refreshed `run_summary.json` is always written next to the rescored rows with `rescored: true`, `rescore_thresholds`, and `rescore_verdicts_changed` fields recording exactly what was applied.
+Results can be re-scored with different thresholds using `--rescore` without re-running inference. `--rescore` accepts an optional `--study` argument that supplies the study's `ThresholdsConfig` as the base, then layers the dedicated threshold flags (e.g. `--latency-red-pct 50`, `--similarity-red 0.75`) on top. The legacy `--set thresholds.latency_red_pct=50` form is still accepted as an escape hatch. The baseline policy is taken from the sibling `run_summary.json` next to the rows JSONL, falling back to single-policy auto-detection. A refreshed `run_summary.json` is always written next to the rescored rows with `rescored: true`, `rescore_thresholds`, and `rescore_verdicts_changed` fields recording exactly what was applied.
 
 ## Repository layout
 

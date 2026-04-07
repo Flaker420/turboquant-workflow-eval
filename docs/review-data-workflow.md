@@ -31,7 +31,7 @@ categories:
   that tells the reviewer what to look for when comparing outputs
   (`prompts/workflow_prompts.yaml:5–6`).
 - **Deterministic generation.** The study config sets `temperature: 0.0` and
-  `do_sample: false` (`configs/studies/default_qwen35_9b.yaml:10–11`), which eliminates
+  `do_sample: false` (`configs/studies/default_qwen35_9b.py:10–11`), which eliminates
   sampling variance and makes policy-to-policy comparisons reproducible.
 
 **Weaknesses:**
@@ -98,7 +98,7 @@ it guarantees that results always reflect the current code and model state.
    noise from the first real measurement.
 
 2. ~~**Single run per prompt.**~~ **Resolved.** The study config now supports a
-   `repetitions` parameter (default 3 per `configs/studies/default_qwen35_9b.yaml:16`).
+   `repetitions` parameter (default 3 per `configs/studies/default_qwen35_9b.py:16`).
    Additional repetitions collect latency, tokens/sec, and VRAM measurements
    (`study.py:118–124`), and the results include per-metric mean and standard
    deviation via `_aggregate_stats()` (`study.py:27–36`).
@@ -143,7 +143,7 @@ The adapter interface (`adapters/base.py`) defines three methods:
 normalization between the eval harness and the core library.
 
 The safe and aggressive policy templates
-(`configs/policies/safe_template.yaml`, `aggressive_template.yaml`) are enabled
+(`configs/policies/safe_template.py`, `aggressive_template.py`) are enabled
 and point to `TurboQuantAdapter`. The harness can run multi-policy comparison
 studies out of the box.
 
@@ -192,7 +192,7 @@ The evaluation layer originally identified as absent has been implemented:
   `scoring.py:compute_verdict()` aggregates latency regression, output-length
   delta, semantic similarity, math correctness, and code execution results
   into a single `verdict` per row. Thresholds are configurable in the study
-  config (`configs/studies/default_qwen35_9b.yaml:19–25`).
+  config (`configs/studies/default_qwen35_9b.py:19–25`).
 
 **Remaining gaps:**
 
@@ -263,7 +263,7 @@ Ranked by impact-to-effort ratio. Implementation status updated as of PRs
 
 4. **Add 8–12 long-context prompts.** **Partial.**
    `scripts/generate_prompts.py` can create long-context prompts
-   programmatically, and `configs/studies/full.yaml` references a generated
+   programmatically, and `configs/studies/full.py` references a generated
    prompt pack alongside the fixed pack. However, no long-context prompts are
    included in the default prompt pack yet.
 

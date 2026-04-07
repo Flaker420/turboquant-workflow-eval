@@ -14,8 +14,8 @@ This repository has been validated on a RunPod environment with the following ef
 ## Supported models
 
 - **Qwen3.5-9B** -- primary validated model (hybrid architecture)
-- **Qwen3-8B** -- also supported via `configs/model/qwen3_8b.yaml` (dense attention)
-- **Qwen2.5-3B-Instruct** -- also supported via `configs/model/qwen25_3b.yaml` (dense attention, GQA 16/2, head_dim 128)
+- **Qwen3-8B** -- also supported via `configs/model/qwen3_8b.py` (dense attention)
+- **Qwen2.5-3B-Instruct** -- also supported via `configs/model/qwen25_3b.py` (dense attention, GQA 16/2, head_dim 128)
 
 ## Important caveat
 
