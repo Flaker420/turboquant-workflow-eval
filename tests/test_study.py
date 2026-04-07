@@ -13,9 +13,28 @@ from turboquant_workflow_eval.schema import (
     PolicySettings,
     RuntimeConfig,
     StudyConfig,
-    ThresholdsConfig,
 )
 from turboquant_workflow_eval.study import _aggregate_stats, run_workflow_study
+
+
+class _FakeModelConfig:
+    """Stand-in for a HF transformers config with the four fields the
+    study driver reads to populate ``model_info``."""
+
+    num_hidden_layers = 4
+    num_attention_heads = 4
+    num_key_value_heads = 2
+    head_dim = 8
+    hidden_size = 32
+
+
+def _make_mock_model() -> MagicMock:
+    """A MagicMock model whose ``.config`` exposes real ints so that the
+    KV-cache-bytes accounting in score_results doesn't trip on
+    ``int(MagicMock())``."""
+    model = MagicMock()
+    model.config = _FakeModelConfig()
+    return model
 
 
 class TestAggregateStats:
@@ -91,7 +110,6 @@ def _make_study(tmp_path: Path, policies: tuple[PolicyConfig, ...]) -> StudyConf
         policies=policies,
         baseline_policy_name="baseline",
         runtime=RuntimeConfig(max_input_tokens=512, max_new_tokens=64),
-        thresholds=ThresholdsConfig(),
     )
 
 
@@ -104,6 +122,8 @@ def _mock_generate_one(model, tokenizer, prompt_text, runtime_cfg, turns=None):
         "tokens_per_second": 40.0,
         "peak_vram_gb": None,
         "output_text": "Hello! This is a test response.",
+        # New required field for the divergence-metrics scoring path.
+        "output_token_ids": list(range(20)),
     }
 
 
@@ -111,7 +131,7 @@ class TestRunWorkflowStudy:
     @patch("turboquant_workflow_eval.study.load_model_and_tokenizer")
     @patch("turboquant_workflow_eval.study.generate_one")
     def test_full_study_run(self, mock_gen, mock_load, tmp_path: Path) -> None:
-        mock_load.return_value = (MagicMock(), MagicMock(), "MockLoader")
+        mock_load.return_value = (_make_mock_model(), MagicMock(), "MockLoader")
         mock_gen.side_effect = _mock_generate_one
 
         study = _make_study(tmp_path, (_make_baseline_policy(),))
@@ -137,7 +157,7 @@ class TestRunWorkflowStudy:
     def test_baseline_policy_name_in_summary_multi_policy(
         self, mock_gen, mock_load, tmp_path: Path
     ) -> None:
-        mock_load.return_value = (MagicMock(), MagicMock(), "MockLoader")
+        mock_load.return_value = (_make_mock_model(), MagicMock(), "MockLoader")
         mock_gen.side_effect = _mock_generate_one
 
         study = _make_study(
@@ -154,7 +174,7 @@ class TestRunWorkflowStudy:
     @patch("turboquant_workflow_eval.study.generate_one")
     def test_error_recovery(self, mock_gen, mock_load, tmp_path: Path) -> None:
         """A failing prompt does not crash the whole study."""
-        mock_load.return_value = (MagicMock(), MagicMock(), "MockLoader")
+        mock_load.return_value = (_make_mock_model(), MagicMock(), "MockLoader")
 
         call_count = 0
 
@@ -177,12 +197,18 @@ class TestRunWorkflowStudy:
 
     @patch("turboquant_workflow_eval.study.load_model_and_tokenizer")
     @patch("turboquant_workflow_eval.study.generate_one")
-    def test_verdict_summary(self, mock_gen, mock_load, tmp_path: Path) -> None:
-        mock_load.return_value = (MagicMock(), MagicMock(), "MockLoader")
+    def test_divergence_summary(self, mock_gen, mock_load, tmp_path: Path) -> None:
+        mock_load.return_value = (_make_mock_model(), MagicMock(), "MockLoader")
         mock_gen.side_effect = _mock_generate_one
 
         study = _make_study(tmp_path, (_make_baseline_policy(),))
         output_dir = tmp_path / "outputs"
         summary = run_workflow_study(study, output_dir)
-        assert "verdict_summary" in summary
-        assert all(k in summary["verdict_summary"] for k in ("green", "yellow", "red"))
+        assert "divergence_summary" in summary
+        assert "verdict_summary" not in summary
+        # Single-policy run: the only policy is its own baseline, so the
+        # divergence_summary excludes it and is empty.
+        assert summary["divergence_summary"] == {}
+        # model_info is captured at first model load and persisted.
+        assert summary["model_info"] is not None
+        assert summary["model_info"]["num_hidden_layers"] == 4

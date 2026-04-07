@@ -103,12 +103,23 @@ class TestResetGenerationState:
 
 # ---------- score_results baseline selection ----------
 
-def _row(policy: str, pid: str, tokens: int = 10, text: str = "x") -> dict:
+def _row(policy: str, pid: str, tokens: int = 10, ids: list[int] | None = None) -> dict:
+    if ids is None:
+        ids = list(range(tokens))
     return {
         "policy_name": policy,
         "prompt_id": pid,
+        "prompt_tokens": 5,
         "output_tokens": tokens,
-        "output_text": text,
+        "output_text": "x",
+        "output_token_ids": ids,
+        # Policy settings the new score_results path expects on every row.
+        "bit_width": 16,
+        "residual_window": 0,
+        "key_strategy": "mse",
+        "value_strategy": "mse",
+        "compressible_layers": None,
+        "compressible_heads": None,
     }
 
 
@@ -117,25 +128,31 @@ class TestScoreResultsBaseline:
         rows = [_row("only", "p1"), _row("only", "p2")]
         score_results(rows)
         for row in rows:
-            assert row["semantic_similarity"] is None
-            assert row["output_length_delta_pct"] == 0.0
+            # Single-policy run: every row IS its own baseline, sentinel
+            # divergence values land on the row.
+            assert row["exact_match"] is True
+            assert row["first_divergence_token"] == -1
+            assert row["token_edit_distance"] == 0
 
     def test_explicit_baseline_used(self) -> None:
         rows = [
-            _row("compressed", "p1", tokens=20),
+            _row("compressed", "p1", tokens=20, ids=list(range(10)) + list(range(100, 110))),
             _row("baseline", "p1", tokens=10),
         ]
         score_results(rows, baseline_policy_name="baseline")
-        # Compressed row should have a 100% length delta vs baseline.
         compressed = next(r for r in rows if r["policy_name"] == "compressed")
-        assert compressed["output_length_delta_pct"] == pytest.approx(100.0)
+        # Same first 10 ids, then 10 differing ids.
+        assert compressed["exact_match"] is False
+        assert compressed["first_divergence_token"] == 10
+        assert compressed["common_prefix_tokens"] == 10
+        assert compressed["output_length_delta_tokens"] == 10
         baseline = next(r for r in rows if r["policy_name"] == "baseline")
-        assert baseline["semantic_similarity"] is None
+        assert baseline["exact_match"] is True
 
     def test_stable_under_row_order(self) -> None:
         rows_a = [
-            _row("baseline", "p1", tokens=10, text="hello world"),
-            _row("compressed", "p1", tokens=15, text="hello"),
+            _row("baseline", "p1", tokens=10),
+            _row("compressed", "p1", tokens=15, ids=list(range(8)) + list(range(200, 207))),
         ]
         rows_b = list(reversed([dict(r) for r in rows_a]))
         score_results(rows_a, baseline_policy_name="baseline")
@@ -147,9 +164,9 @@ class TestScoreResultsBaseline:
         a = by_policy(rows_a)
         b = by_policy(rows_b)
         for name in ("baseline", "compressed"):
-            assert a[name]["output_length_delta_pct"] == b[name]["output_length_delta_pct"]
-            assert a[name]["semantic_similarity"] == b[name]["semantic_similarity"]
-            assert a[name]["verdict"] == b[name]["verdict"]
+            assert a[name]["first_divergence_token"] == b[name]["first_divergence_token"]
+            assert a[name]["token_edit_distance"] == b[name]["token_edit_distance"]
+            assert a[name]["exact_match"] == b[name]["exact_match"]
 
     def test_missing_baseline_name_multi_policy(self) -> None:
         rows = [_row("a", "p1"), _row("b", "p1")]
