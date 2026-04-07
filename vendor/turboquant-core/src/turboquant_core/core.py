@@ -777,13 +777,35 @@ class TQQuantizedCache:
 
         if "head_mask" in entry:
             # Per-head masking: reconstruct full-head K/V (MSE-dequantized
-            # for the masked heads, raw for the complement) and run the
-            # unmodified attention formula. QJL bias correction is skipped
-            # on this path — research use case is head ablation, not
-            # maximal numerical fidelity.
+            # for masked heads, raw for complement heads). QJL bias
+            # correction is applied to the masked heads only and scattered
+            # into a zero-filled full-head buffer before summing — see
+            # the masked/full scatter idiom in _reconstruct_full_kv.
             K_full, V_compressed = self._reconstruct_full_kv(entry)
             scores_mse = Q @ K_full.transpose(-2, -1)
-            compressed_scores = scores_mse / (hd ** 0.5)
+            if self.key_strategy == "mse+qjl":
+                b = entry["batch"]
+                m = entry["num_heads"]             # masked head count
+                nh_full = entry["full_num_heads"]
+                mask = list(entry["head_mask"])
+                Q_m = Q.index_select(
+                    1, torch.tensor(mask, device=Q.device, dtype=torch.long)
+                )
+                Q_flat = Q_m.reshape(b * m * q_len, hd)
+                Q_qjl = self.k_qjl.quantize(Q_flat).reshape(b * m, q_len, hd)
+                k_qjl = entry["k_qjl"].reshape(b * m, compressed_len, hd)
+                correction_m = Q_qjl.float() @ k_qjl.float().transpose(-2, -1)
+                correction_m = correction_m * (math.pi / (2 * hd))
+                correction_m = correction_m * entry["k_rn"].reshape(b * m, 1, compressed_len)
+                correction_m = correction_m * entry["k_n"].reshape(b * m, 1, compressed_len)
+                correction_m = correction_m.reshape(b, m, q_len, compressed_len)
+                correction_full = correction_m.new_zeros(
+                    b, nh_full, q_len, compressed_len
+                )
+                correction_full[:, mask, :, :] = correction_m
+                compressed_scores = (scores_mse + correction_full) / (hd ** 0.5)
+            else:
+                compressed_scores = scores_mse / (hd ** 0.5)
         else:
             b = entry["batch"]
             nh = entry["num_heads"]

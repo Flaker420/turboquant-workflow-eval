@@ -796,6 +796,40 @@ def test_cache_heads_compute_attention_shape_and_finite():
     assert not torch.isinf(out).any()
 
 
+def test_cache_heads_qjl_correction_matches_full():
+    """With an all-heads mask, per-head + mse+qjl must numerically match
+    the legacy full-head + mse+qjl path."""
+    torch.manual_seed(7)
+    base = _cache_ctor_kwargs(key_strategy="mse+qjl")
+    full = TQQuantizedCache(**base)
+    masked = TQQuantizedCache(**base, compressible_heads=list(range(8)))
+    K = torch.randn(1, 8, 16, 128)
+    V = torch.randn(1, 8, 16, 128)
+    Q = torch.randn(1, 8, 4, 128)
+    full.update(K, V, layer_idx=0)
+    masked.update(K, V, layer_idx=0)
+    out_full = full.compute_attention(Q, layer_idx=0)
+    out_masked = masked.compute_attention(Q, layer_idx=0)
+    # Same MSE+QJL math on the same tokens — reconstructed path should
+    # agree with the legacy path within float32 noise.
+    assert torch.allclose(out_full, out_masked, atol=1e-4)
+
+
+def test_cache_heads_qjl_correction_finite():
+    """Per-head + mse+qjl with a strict subset mask produces finite
+    output of the expected full-head shape."""
+    torch.manual_seed(11)
+    cache = TQQuantizedCache(**_cache_ctor_kwargs(
+        key_strategy="mse+qjl", compressible_heads=[0, 2, 5]))
+    K = torch.randn(1, 8, 16, 128)
+    V = torch.randn(1, 8, 16, 128)
+    Q = torch.randn(1, 8, 4, 128)
+    cache.update(K, V, layer_idx=0)
+    out = cache.compute_attention(Q, layer_idx=0)
+    assert out.shape == (1, 8, 4, 128)
+    assert not torch.isnan(out).any() and not torch.isinf(out).any()
+
+
 def test_cache_heads_complement_exact_vs_reference():
     """Complement heads use raw K/V, so their attention output for a Q that
     zeroes out the masked heads must equal the reference full-precision
@@ -959,6 +993,8 @@ if __name__ == "__main__":
         test_cache_heads_validation_rejects_duplicates,
         test_cache_heads_update_stores_mask,
         test_cache_heads_compute_attention_shape_and_finite,
+        test_cache_heads_qjl_correction_matches_full,
+        test_cache_heads_qjl_correction_finite,
         test_cache_heads_complement_exact_vs_reference,
         # compressible_heads backend-class tests
         test_compressible_heads_default_none,

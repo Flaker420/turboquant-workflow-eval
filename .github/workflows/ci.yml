@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          pip install pytest pyyaml
+          # No torch — this job covers the torch-free sandbox suite.
+          # Torch-gated tests (generation, turboquant-core hooks, adapter
+          # round-trips) are exercised on the pod as part of the manual
+          # verification steps.
+      - name: Run torch-free tests
+        env:
+          PYTHONPATH: src:vendor/turboquant-core/src
+        run: |
+          pytest -q \
+            tests/test_schema.py \
+            tests/test_loader.py \
+            tests/test_cli_docs.py \
+            tests/test_scoring.py \
+            tests/test_reporting.py \
+            tests/test_code_runner.py \
+            tests/test_download.py \
+            tests/test_import_utils.py
+      - name: Verify CLI docs are in sync
+        env:
+          PYTHONPATH: src:vendor/turboquant-core/src
+        run: python scripts/generate_cli_docs.py --check

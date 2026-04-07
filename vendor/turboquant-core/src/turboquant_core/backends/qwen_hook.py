@@ -433,10 +433,9 @@ def _gqa_attention(Q, cache, layer_idx, num_q_heads, num_kv_heads,
 
     if per_head_enabled:
         # Per-head masking: reconstruct full-head K/V (MSE-dequantized
-        # for masked heads, raw for complement heads). The downstream
-        # GQA expansion + softmax runs unchanged on the full-head
-        # tensor. QJL bias correction is skipped deliberately on this
-        # path — see TQQuantizedCache._reconstruct_full_kv.
+        # for masked heads, raw for complement heads) and scatter the
+        # masked-head QJL correction into a zero-filled full-Q-head
+        # buffer before summing.
         K_mse, V_compressed = cache._reconstruct_full_kv(entry)
     else:
         K_mse = tq_dequantize_mse(
@@ -474,6 +473,42 @@ def _gqa_attention(Q, cache, layer_idx, num_q_heads, num_kv_heads,
         correction = correction.reshape(bsz, num_q_heads, q_len, compressed_len)
 
         compressed_scores = (scores_mse + correction) / (head_dim ** 0.5)
+    elif cache.key_strategy == "mse+qjl" and per_head_enabled:
+        # Per-head QJL: iterate only the masked KV heads and scatter the
+        # per-group correction into a zero-filled [bsz, num_q_heads,
+        # q_len, compressed_len] buffer at the q-head indices
+        # corresponding to each masked KV head (kv_head * num_groups ..
+        # (kv_head+1) * num_groups).
+        m = entry["num_heads"]
+        mask = list(entry["head_mask"])
+        k_qjl_m = entry["k_qjl"].reshape(bsz, m, compressed_len, head_dim)
+        k_rn_m = entry["k_rn"].reshape(bsz, m, compressed_len)
+        k_n_m = entry["k_n"].reshape(bsz, m, compressed_len)
+
+        correction_full = torch.zeros(
+            bsz, num_q_heads, q_len, compressed_len,
+            device=scores_mse.device, dtype=scores_mse.dtype,
+        )
+        Q_grouped = Q.reshape(bsz, num_kv_heads, num_groups, q_len, head_dim)
+        for sub_idx, kv_head in enumerate(mask):
+            Q_g = Q_grouped[:, kv_head].reshape(bsz * num_groups * q_len, head_dim)
+            Q_qjl = cache.k_qjl.quantize(Q_g).reshape(bsz * num_groups, q_len, head_dim)
+
+            k_qjl_g = k_qjl_m[:, sub_idx].unsqueeze(1).expand(-1, num_groups, -1, -1)
+            k_qjl_g = k_qjl_g.reshape(bsz * num_groups, compressed_len, head_dim)
+
+            corr = Q_qjl.float() @ k_qjl_g.float().transpose(-2, -1)
+            corr = corr * (math.pi / (2 * head_dim))
+            k_rn_g = k_rn_m[:, sub_idx].unsqueeze(1).expand(-1, num_groups, -1)
+            k_n_g = k_n_m[:, sub_idx].unsqueeze(1).expand(-1, num_groups, -1)
+            corr = corr * k_rn_g.reshape(bsz * num_groups, 1, compressed_len)
+            corr = corr * k_n_g.reshape(bsz * num_groups, 1, compressed_len)
+            corr = corr.reshape(bsz, num_groups, q_len, compressed_len)
+            q_head_start = kv_head * num_groups
+            correction_full[:, q_head_start:q_head_start + num_groups, :, :] = corr.to(
+                correction_full.dtype
+            )
+        compressed_scores = (scores_mse + correction_full) / (head_dim ** 0.5)
     else:
         compressed_scores = scores_mse / (head_dim ** 0.5)
 
