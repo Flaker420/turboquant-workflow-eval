@@ -46,8 +46,7 @@ Built in and ready to run:
 - Q / K / V projection capture for preflight checks
 - baseline pass-through adapter with revert support for model reuse
 - composable study runner (`prepare_study` / `run_policy` / `score_results` / `write_results`)
-- automated quality scoring (math reference checking, code execution, semantic similarity)
-- configurable green/yellow/red verdict system with per-prompt and per-category verdicts
+- automated metrics layer: token-level divergence vs baseline (exact match, first-divergence-token index, common-prefix fraction, edit distance) plus theoretical KV-cache compression bytes derived from policy settings -- see "Why these metrics" below
 - repetition support with mean/std aggregation for stable benchmarking
 - prompt generation script for long-context evaluation prompts
 - Gradio web UI (`app.py`) with 8 tabs for interactive workflow execution
@@ -55,7 +54,7 @@ Built in and ready to run:
 - `--single` smoke-test mode (one prompt, one policy, one repetition)
 - `--set key=value` CLI config overrides with dot-notation (e.g. `--set runtime.max_new_tokens=128`)
 - prompt filtering from CLI (`--prompt-id`, `--prompt-category`, `--prompt-filter`)
-- `--rescore` existing results with new thresholds (no GPU, pure computation)
+- `--rescore` recomputes divergence + KV-cache metrics over an existing `rows.jsonl` (no GPU; requires `output_token_ids` in the file)
 - event-driven study loop with pause/resume/stop and configurable early stopping
 - incremental JSONL output (partial results survive crashes)
 - environment variable expansion in YAML configs (`${VAR:-default}`)
@@ -93,7 +92,7 @@ Authoring a new study is just writing Python:
 # configs/studies/my_run.py
 from pathlib import Path
 from turboquant_workflow_eval.loader import load_model_module, load_policy_module
-from turboquant_workflow_eval.schema import StudyConfig, RuntimeConfig, ThresholdsConfig
+from turboquant_workflow_eval.schema import StudyConfig, RuntimeConfig
 
 _HERE = Path(__file__).resolve().parent
 
@@ -107,7 +106,6 @@ STUDY = StudyConfig(
     ),
     baseline_policy_name="baseline",
     runtime=RuntimeConfig(max_input_tokens=2048, max_new_tokens=256),
-    thresholds=ThresholdsConfig(latency_red_pct=50.0),
 )
 ```
 
@@ -268,13 +266,13 @@ The UI starts on `http://0.0.0.0:7860`. On RunPod, access it through your pod's 
 | **Environment** | Validate CUDA/torch setup, check HuggingFace cache, download models |
 | **Model Inspection** | Load a model into memory, discover and inspect attention blocks |
 | **Preflight** | Run Q/K/V tensor statistics on loaded model, view results as JSON |
-| **Study Runner** | Select study and policy configs, filter prompts, run study with pause/resume/stop controls, live verdict summary |
+| **Study Runner** | Select study and policy configs, filter prompts, run study with pause/resume/stop controls |
 | **Results** | Browse completed study outputs: comparison table, per-prompt text, run metadata |
 | **Quick Test** | Run a single prompt with parameter sliders (max tokens, temperature, repetitions), see instant results |
-| **Re-Score** | Adjust verdict thresholds with sliders and re-score existing results instantly (no GPU) |
-| **Comparison** | Side-by-side diff of two study runs with verdict highlighting |
+| **Re-Score** | Recompute divergence + KV-cache compression metrics from a saved `rows.jsonl` (no GPU) |
+| **Comparison** | Side-by-side diff of two study runs with divergence + compression deltas |
 
-The UI calls the same Python library functions as the CLI scripts. A model loaded in the Model Inspection tab stays in memory and is reused by the Preflight and Quick Test tabs.
+The UI calls the same Python library functions as the CLI scripts. A model loaded in the Model Inspection tab stays in memory and is reused by the Preflight and Quick Test tabs. (Note: the Re-Score and Comparison tab descriptions above describe the post-rework target behaviour; `app.py` itself is currently broken -- see the warning below the CLI section.)
 
 ## Manual step-by-step path
 
@@ -366,7 +364,7 @@ The `python -m turboquant_workflow_eval` entry point (and `scripts/run_workflow_
 | `--policies POLICIES` | str | — | Comma-separated list of policy module paths that overrides study.policies. |
 | `--single` | flag | False | Quick smoke test: first matching prompt, first enabled policy, 1 repetition |
 | `--dry-run` | flag | False | Validate all configs and print execution plan without touching the GPU |
-| `--rescore ROWS_JSONL` | str | — | Re-score existing results with new thresholds (no GPU). Use --set for threshold overrides. |
+| `--rescore ROWS_JSONL` | str | — | Recompute divergence + KV-cache compression metrics over an existing rows.jsonl (no GPU; requires output_token_ids in the file). |
 | `--prompt-id PROMPT-IDS` | str (repeatable) | — | Run only the specified prompt ID (repeatable) |
 | `--prompt-category PROMPT-CATEGORIES` | str (repeatable) | — | Run only prompts in the specified category (repeatable) |
 | `--prompt-filter REGEX` | str | — | Filter prompts by regex on id/title |
@@ -413,22 +411,10 @@ The `python -m turboquant_workflow_eval` entry point (and `scripts/run_workflow_
 | `--shuffle-seed SHUFFLE-SEED` | int | — | Override runtime.shuffle_seed. |
 | `--baseline-policy BASELINE-POLICY` | str | — | Override study.baseline_policy_name. |
 
-### thresholds
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--latency-yellow-pct LATENCY-YELLOW-PCT` | float | — | Override thresholds.latency_yellow_pct. |
-| `--latency-red-pct LATENCY-RED-PCT` | float | — | Override thresholds.latency_red_pct. |
-| `--similarity-yellow SIMILARITY-YELLOW` | float | — | Override thresholds.similarity_yellow. |
-| `--similarity-red SIMILARITY-RED` | float | — | Override thresholds.similarity_red. |
-| `--output-length-yellow-pct OUTPUT-LENGTH-YELLOW-PCT` | float | — | Override thresholds.output_length_yellow_pct. |
-| `--output-length-red-pct OUTPUT-LENGTH-RED-PCT` | float | — | Override thresholds.output_length_red_pct. |
-
 ### early stop
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--max-red-verdicts MAX-RED-VERDICTS` | int | — | Override early_stop.max_red_verdicts. |
 | `--max-error-rate MAX-ERROR-RATE` | float | — | Override early_stop.max_error_rate. |
 <!-- cli-docs:end -->
 
@@ -458,9 +444,9 @@ python -m turboquant_workflow_eval --study configs/studies/default_qwen35_9b.py 
 python -m turboquant_workflow_eval --study configs/studies/default_qwen35_9b.py \
   --prompt-category coding
 
-# Re-score existing results with looser latency threshold
-python -m turboquant_workflow_eval --rescore outputs/study_run/rows.jsonl \
-  --latency-red-pct 50
+# Recompute divergence + KV-cache compression metrics over an existing rows.jsonl
+# (no GPU; needs output_token_ids in the file -- runs are expected to carry it)
+python -m turboquant_workflow_eval --rescore outputs/study_run/rows.jsonl
 ```
 
 > **Note:** the Gradio UI is **temporarily broken** between this PR and the UI rework PR. `app.py` still imports the deleted YAML loaders; launching it will fail at import. Use the CLI in the meantime.
@@ -479,23 +465,71 @@ That gives you a direct **works / degrades / fails** view instead of a research-
 
 ### Row schema
 
-Every row carries the same set of fields whether the prompt succeeded or failed. A successful row has `verdict ∈ {green, yellow, red}` plus `output_text`, `output_tokens`, `latency_s`, `tokens_per_second`, `peak_vram_gb`, `semantic_similarity`, `output_length_delta_pct`, and (for code prompts) `code_verdict` / `code_passed` / `code_failed` / `code_errors`. A failed row has `error` set, `verdict == "error"`, `code_verdict == "error"`, `output_tokens == 0`, and `semantic_similarity == None`. Filter on `verdict == "error"` to find failed prompts; `score_results` skips them when computing baseline deltas, and refuses to use an error row as the baseline reference for a multi-policy study.
+Every row carries the same set of fields whether the prompt succeeded or failed. A successful row has `output_text`, `output_token_ids`, `output_tokens`, `latency_s`, `tokens_per_second`, `peak_vram_gb`, the per-policy knobs (`bit_width`, `residual_window`, `key_strategy`, `value_strategy`, `compressible_layers`, `compressible_heads`), and the post-hoc metric block populated by `score_results`:
 
-### Live verdicts and early stop
+- **Divergence vs baseline** (every non-baseline row): `exact_match`, `first_divergence_token`, `common_prefix_tokens`, `common_prefix_frac`, `token_edit_distance`, `output_length_delta_tokens`. The baseline row gets sentinel values (`exact_match=True`, `first_divergence_token=-1`, distance `0`).
+- **Theoretical KV-cache compression** (every row, baseline included): `kv_cache_bytes_baseline`, `kv_cache_bytes_policy`, `kv_cache_compression_ratio`, `kv_cache_bytes_saved`. Baseline rows have `kv_cache_compression_ratio == 1.0` by construction.
 
-`run_policy` populates a shared baseline lookup as the baseline policy executes and stamps a real `verdict` (plus `semantic_similarity` and `output_length_delta_pct`) on every row before emitting the `prompt_completed` event. This means the early-stop controller can react to red verdicts as they happen instead of only after the full study finishes. Two early-stop knobs are read from `early_stop:` in the study YAML:
+A failed row has `error` set, `output_token_ids == []`, `output_tokens == 0`, and every divergence / KV-cache column written as `None`. `score_results` skips error rows when computing baseline deltas and refuses to use an error row as the baseline reference for a multi-policy study. Filter on `error` (or `output_tokens == 0`) to find failed prompts.
 
-```yaml
-early_stop:
-  max_red_verdicts: 5      # stop after this many red verdicts across all policies
-  max_error_rate: 0.5      # stop if errored / total exceeds this fraction
+### Why these metrics
+
+The rewrite of the scoring layer is grounded in
+[`vendor/turboquant-core/docs/algorithm-comparison.md`](vendor/turboquant-core/docs/algorithm-comparison.md),
+the audit-of-eight community implementations that motivated the reframe.
+Three sections of that document drive the choices made here:
+
+- **§5 "Bit-Packing & Actual Compression"**: index-tensor storage caps the
+  achievable ratio at ~1.9-2.0x, while community implementations with
+  proper bit-packing report 4.4-5.1x. `compute_kv_cache_bytes` models the
+  per-element cost as `bit_width / 8` rather than as a fixed constant so
+  the future bit-packing work can plug into the same accounting helper.
+- **"Measurement discipline"** (under "PR1: Algorithmic Ablation Matrix"):
+  enumerates exactly the bookkeeping any published ablation must carry --
+  compressed-token count, residual-window length, protected-layer policy,
+  honest bytes/token including all metadata, and end-to-end (not
+  per-layer) memory reduction. Every row this harness writes carries that
+  bookkeeping by construction.
+- **"Architecture ceiling"**: even with perfect compression, Qwen3.5-9B
+  cannot exceed ~1.33x end-to-end because only 8/32 layers are GatedAttn
+  and the remaining DeltaNet layers carry opaque recurrent state.
+  `compute_kv_cache_bytes` honours this -- non-compressible layers are
+  folded in at full bf16 -- so a small Qwen3.5-9B ratio is the correct
+  answer, not a regression.
+
+### Live divergence and early stop
+
+`run_policy` no longer stamps a per-row verdict mid-run; the divergence and
+KV-cache columns are computed in the post-hoc `score_results` join after
+the study has finished, since both metrics need every prompt's baseline
+counterpart to exist before they make sense. The early-stop controller now
+has only one live arm:
+
+```python
+early_stop=EarlyStopConfig(
+    max_error_rate=0.5,    # stop if errored / total exceeds this fraction
+)
 ```
 
-`score_results` runs at the end of the study and re-stamps the same fields idempotently, so the final outputs match what the live event stream reported.
+The `max_red_verdicts` knob is gone with the verdict pipeline.
 
 ### Re-scoring
 
-Results can be re-scored with different thresholds using `--rescore` without re-running inference. `--rescore` accepts an optional `--study` argument that supplies the study's `ThresholdsConfig` as the base, then layers the dedicated threshold flags (e.g. `--latency-red-pct 50`, `--similarity-red 0.75`) on top. The legacy `--set thresholds.latency_red_pct=50` form is still accepted as an escape hatch. The baseline policy is taken from the sibling `run_summary.json` next to the rows JSONL, falling back to single-policy auto-detection. A refreshed `run_summary.json` is always written next to the rescored rows with `rescored: true`, `rescore_thresholds`, and `rescore_verdicts_changed` fields recording exactly what was applied.
+`--rescore ROWS_JSONL` reloads an existing `rows.jsonl` and recomputes the
+divergence + KV-cache columns without touching the GPU. There are no
+threshold knobs to pass any more -- the post-hoc metrics are deterministic
+functions of the row contents. The rescore path:
+
+1. Reads the sibling `run_summary.json` for `model_info`
+   (`num_hidden_layers`, `num_key_value_heads`, `head_dim`); if those are
+   absent, the divergence columns are still populated but the KV-cache
+   columns end up empty.
+2. Hard-fails with one actionable error if any non-error row is missing
+   `output_token_ids`. Rows produced before the divergence-metrics schema
+   bump cannot be cold-rescored -- rerun the study to regenerate them.
+3. Writes a refreshed `run_summary.json` (with `rescored: true` and the
+   new `divergence_summary` block), `workflow_compare.csv`, and
+   `examples.md` next to the rows file.
 
 ## Repository layout
 

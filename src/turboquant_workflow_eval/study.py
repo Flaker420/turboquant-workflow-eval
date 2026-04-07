@@ -70,12 +70,10 @@ class StudyController:
     def check_early_stop(self, row: dict) -> bool:
         """Check early-stop conditions after a prompt completes.
 
-        Returns True if the study should stop. The legacy "red verdict"
-        condition (``EarlyStopConfig.max_red_verdicts``) is intentionally
-        a no-op in the divergence-metrics world: rows no longer carry a
-        verdict, and the meaningful per-row signal is captured by the
-        post-hoc divergence + KV-cache scoring rather than mid-run.
-        Only the error-rate guard remains live.
+        Returns True if the study should stop. Only the error-rate guard
+        is live: rows no longer carry a per-row verdict, and the meaningful
+        per-row signal is captured by post-hoc divergence + KV-cache
+        scoring rather than mid-run.
         """
         self._prompt_count += 1
         if row.get("error"):

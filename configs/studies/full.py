@@ -7,7 +7,6 @@ from turboquant_workflow_eval.schema import (
     OutputsConfig,
     RuntimeConfig,
     StudyConfig,
-    ThresholdsConfig,
 )
 
 _HERE = Path(__file__).resolve().parent
@@ -31,14 +30,6 @@ STUDY = StudyConfig(
         max_new_tokens=384,
         repetitions=3,
         shuffle_policies=True,
-    ),
-    thresholds=ThresholdsConfig(
-        latency_yellow_pct=10.0,
-        latency_red_pct=25.0,
-        similarity_yellow=0.92,
-        similarity_red=0.80,
-        output_length_yellow_pct=15.0,
-        output_length_red_pct=30.0,
     ),
     outputs=OutputsConfig(
         write_individual_text_files=True,

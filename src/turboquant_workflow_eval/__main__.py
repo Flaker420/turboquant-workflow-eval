@@ -237,7 +237,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true",
                         help="Validate all configs and print execution plan without touching the GPU")
     parser.add_argument("--rescore", default=None, metavar="ROWS_JSONL",
-                        help="Re-score existing results with new thresholds (no GPU). Use --set for threshold overrides.")
+                        help="Recompute divergence + KV-cache compression metrics over an existing rows.jsonl (no GPU; requires output_token_ids in the file).")
 
     # --- Prompt filters ---
     parser.add_argument("--prompt-id", action="append", dest="prompt_ids", default=None,
@@ -305,25 +305,8 @@ def _build_parser() -> argparse.ArgumentParser:
     r.add_argument("--baseline-policy", default=None,
                    help="Override study.baseline_policy_name.")
 
-    # --- Threshold knobs ---
-    t = parser.add_argument_group("thresholds")
-    t.add_argument("--latency-yellow-pct", type=float, default=None,
-                   help="Override thresholds.latency_yellow_pct.")
-    t.add_argument("--latency-red-pct", type=float, default=None,
-                   help="Override thresholds.latency_red_pct.")
-    t.add_argument("--similarity-yellow", type=float, default=None,
-                   help="Override thresholds.similarity_yellow.")
-    t.add_argument("--similarity-red", type=float, default=None,
-                   help="Override thresholds.similarity_red.")
-    t.add_argument("--output-length-yellow-pct", type=float, default=None,
-                   help="Override thresholds.output_length_yellow_pct.")
-    t.add_argument("--output-length-red-pct", type=float, default=None,
-                   help="Override thresholds.output_length_red_pct.")
-
     # --- Early-stop knobs ---
     e = parser.add_argument_group("early stop")
-    e.add_argument("--max-red-verdicts", type=int, default=None,
-                   help="Override early_stop.max_red_verdicts.")
     e.add_argument("--max-error-rate", type=float, default=None,
                    help="Override early_stop.max_error_rate.")
 
@@ -428,40 +411,24 @@ def _apply_overrides(study: StudyConfig, args: argparse.Namespace) -> StudyConfi
         new_runtime = replace(study.runtime, **runtime_updates)
         study = replace(study, runtime=new_runtime)
 
-    # 6. Threshold overrides.
-    threshold_updates: dict[str, Any] = {}
-    for f in (
-        "latency_yellow_pct", "latency_red_pct",
-        "similarity_yellow", "similarity_red",
-        "output_length_yellow_pct", "output_length_red_pct",
-    ):
-        v = getattr(args, f, None)
-        if v is not None:
-            threshold_updates[f] = v
-    if threshold_updates:
-        new_thresholds = replace(study.thresholds, **threshold_updates)
-        study = replace(study, thresholds=new_thresholds)
-
-    # 7. Early-stop overrides.
+    # 6. Early-stop overrides.
     early_updates: dict[str, Any] = {}
-    if args.max_red_verdicts is not None:
-        early_updates["max_red_verdicts"] = args.max_red_verdicts
     if args.max_error_rate is not None:
         early_updates["max_error_rate"] = args.max_error_rate
     if early_updates:
         new_early = replace(study.early_stop, **early_updates)
         study = replace(study, early_stop=new_early)
 
-    # 8. baseline-policy override.
+    # 7. baseline-policy override.
     if args.baseline_policy is not None:
         study = replace(study, baseline_policy_name=args.baseline_policy)
 
-    # 9. --single forces repetitions=1.
+    # 8. --single forces repetitions=1.
     if args.single:
         new_runtime = replace(study.runtime, repetitions=1)
         study = replace(study, runtime=new_runtime)
 
-    # 10. Generic escape hatches (last so they win over typed flags).
+    # 9. Generic escape hatches (last so they win over typed flags).
     if args.overrides:
         study = apply_set_overrides(study, args.overrides)
     if args.policy_overrides:
