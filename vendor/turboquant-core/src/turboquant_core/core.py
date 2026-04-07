@@ -202,7 +202,12 @@ def tq_dequantize_mse(indices, norms, cb, rot):
 class QJLProjection:
     def __init__(self, d, seed=123, device=torch.device("cpu")):
         self.d = d
-        self.S = torch.randn(d, d, generator=torch.Generator().manual_seed(seed), device=device)
+        # torch.Generator() defaults to CPU; PyTorch rejects a CPU
+        # generator when the target tensor lives on CUDA. Build the
+        # generator on the tensor's device so both CPU and CUDA paths
+        # seed deterministically without the device-mismatch error.
+        gen = torch.Generator(device=device).manual_seed(seed)
+        self.S = torch.randn(d, d, generator=gen, device=device)
 
     def quantize(self, x):
         return (x @ self.S.T).sign().to(torch.int8)
