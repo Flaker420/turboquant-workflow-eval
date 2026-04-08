@@ -391,7 +391,7 @@ def run_policy(
 
 
 # ---------------------------------------------------------------------------
-# Phase 4: Post-processing (scoring, verdicts)
+# Phase 4: Post-processing (divergence + KV-cache scoring)
 # ---------------------------------------------------------------------------
 
 def score_results(
@@ -635,8 +635,9 @@ def run_workflow_study(
 
     rows: list[dict] = []
     policies_used: list[dict] = []
-    # Shared baseline lookup for provisional verdicts inside run_policy.
-    # Populated as the baseline policy executes; consulted by every policy.
+    # Shared baseline lookup populated during run_policy so live consumers
+    # (early-stop controller, event stream) can look up baseline rows by
+    # prompt_id before the post-hoc score_results pass runs.
     baseline_by_prompt: dict[str, dict] = {}
 
     # --- Load model once, reuse across policies ---

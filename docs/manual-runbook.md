@@ -212,37 +212,20 @@ python scripts/run_workflow_study.py \
 
 ## 10. Re-score existing results (no GPU)
 
-After reviewing study outputs, you can re-score with different thresholds without re-running inference:
+After reviewing study outputs, you can recompute the divergence + KV-cache columns of an existing `rows.jsonl` without re-running inference:
 
 ```bash
 python -m turboquant_workflow_eval \
-  --rescore outputs/study_compare/rows.jsonl \
-  --set thresholds.latency_red_pct=50
+  --rescore outputs/study_compare/rows.jsonl
 ```
 
-`--study` is **optional** in `--rescore` mode. When supplied, the study YAML's `thresholds:` block is used as the base and `--set` overrides are layered on top:
+The recomputation is deterministic and takes no threshold knobs — the post-hoc metrics are pure functions of each row's `output_token_ids` and the policy/model bookkeeping carried alongside it. The rescore path:
 
-```bash
-python -m turboquant_workflow_eval \
-  --study configs/studies/default_qwen35_9b.py \
-  --rescore outputs/study_compare/rows.jsonl \
-  --set thresholds.latency_red_pct=50
-```
+1. Reads the sibling `run_summary.json` for `model_info` (`num_hidden_layers`, `num_key_value_heads`, `head_dim`); if those are absent, the divergence columns are still populated but the KV-cache columns end up empty.
+2. Hard-fails with one actionable error if any non-error row is missing `output_token_ids`. Rows produced before the divergence-metrics schema bump cannot be cold-rescored — rerun the study to regenerate them.
+3. Writes a refreshed `run_summary.json` (with `rescored: true` and the new `divergence_summary` block), `workflow_compare.csv`, and `examples.md` next to the rows file.
 
-Bare `--set latency_red_pct=50` (without the `thresholds.` prefix) is also accepted in rescore mode and is normalized to a `thresholds.` override automatically.
-
-The baseline policy is taken from the sibling `run_summary.json` next to the rows JSONL, so you do not need to repeat `baseline_policy_name` on the command line. A refreshed `run_summary.json` is always written next to the rescored rows with `rescored: true`, `rescore_thresholds`, and `rescore_verdicts_changed` recording exactly what was applied.
-
-This recomputes verdicts on existing `rows.jsonl` and rewrites the CSV and markdown files. The Gradio UI also has a **Re-Score** tab with threshold sliders for interactive tuning.
-
-Per-category thresholds are supported (see `scoring._resolve_thresholds`):
-
-```bash
-python -m turboquant_workflow_eval \
-  --rescore outputs/study_compare/rows.jsonl \
-  --set thresholds.default.latency_red_pct=25 \
-  --set thresholds.math.latency_red_pct=50
-```
+The baseline policy is taken from the sibling `run_summary.json`, so you do not need to repeat `baseline_policy_name` on the command line.
 
 ## 11. Generate additional prompts (optional)
 
