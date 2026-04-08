@@ -1,7 +1,8 @@
 # Review: Data Creation & Methods — Quality and Pertinence
 
 > Scope: evaluation of the data artefacts, measurement methodology, and
-> fitness-for-purpose of the workflow study implemented in this repository.
+> fitness-for-purpose of the test/implementation/benchmarking framework
+> in this repository.
 
 ---
 

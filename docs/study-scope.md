@@ -1,10 +1,12 @@
-# Study scope
+# Project scope
 
-This repository is designed for a **compact engineering study**, not a research-paper ablation.
+This repository is a model-agnostic **test, implementation, and benchmarking framework** for TurboQuant-style KV-cache compression. It builds on the community's published findings as a starting point for its own exploration and is the practical counterpart to [turboquant-core](https://github.com/Flaker420/turboquant-core).
 
-## Primary question
+## What this framework is for
 
-Which compression policy is usable in my workflow, and what degrades when I push harder?
+- test TurboQuant-style compression policies on any HuggingFace model
+- implement new adapters and new policies against the stable contract in `docs/adapter-interface.md`
+- benchmark compression configurations against an uncompressed baseline using deterministic divergence + theoretical KV-cache compression metrics
 
 ## Supported models
 
@@ -16,7 +18,7 @@ Select the model through the `--model-config` flag or the study config YAML.
 
 ## Non-goals
 
-Not in scope for the first pass:
+This framework is opinionated about what it is **not** in scope for:
 
 - architecture redesign
 - exhaustive paper-style ablations

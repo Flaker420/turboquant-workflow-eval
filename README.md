@@ -1,17 +1,21 @@
 # TurboQuant Workflow Evaluation
 
-A practical, **RunPod-first** evaluation harness for answering a simple question:
+A **model-agnostic** test, implementation, and benchmarking framework for TurboQuant-style KV-cache compression. The repository is the practical counterpart to [turboquant-core](https://github.com/Flaker420/turboquant-core): it acknowledges and aligns with the community's published implementations and findings (see [`vendor/turboquant-core/docs/algorithm-comparison.md`](vendor/turboquant-core/docs/algorithm-comparison.md)) and uses them as the starting point for its own exploration.
 
-> Which compression policy is usable in my workflow, and what breaks when I push it harder?
+Use it to:
 
-This repository is the evaluation counterpart to [turboquant-core](https://github.com/Flaker420/turboquant-core), the TurboQuant KV-cache compression library. It is **not** a paper-style ablation project. It is a compact harness with:
+- **test** TurboQuant-style compression policies on any HuggingFace model
+- **implement** new adapters and new policies against a stable contract
+- **benchmark** compression configurations against an uncompressed baseline using deterministic divergence + theoretical KV-cache compression metrics
 
-- model discovery and preflight instrumentation
-- a fixed prompt pack for reasoning, math, coding, and retrieval
+It is an engineering framework, not a paper-style ablation project. What it provides:
+
+- a pluggable adapter interface (`docs/adapter-interface.md`) for integrating any TurboQuant-style backend
+- model-agnostic discovery and preflight instrumentation that works with any HuggingFace model
+- a fixed prompt pack for reasoning, math, coding, and retrieval, plus a generation script for long-context prompts
+- post-hoc divergence + theoretical KV-cache compression metrics computed against a baseline policy
 - reproducible CSV / JSONL / Markdown outputs
-- a pluggable adapter interface for integrating TurboQuant backends
-- a Gradio web UI for interactive workflow execution
-- RunPod-oriented bootstrap and storage conventions
+- RunPod-oriented bootstrap and storage conventions for the validated cu128 environment
 
 ## Supported models
 
@@ -555,5 +559,6 @@ Do not start with a large sweep.
 This repository is intentionally opinionated:
 
 - vary compression **policy**, not model architecture
-- optimize for **workflow decisions**, not paper completeness
+- optimize for **engineering decisions** — test, implement, and benchmark before committing to a policy
+- **align with community findings** (see `vendor/turboquant-core/docs/algorithm-comparison.md`) rather than re-derive them
 - the safe and aggressive templates use the built-in `TurboQuantAdapter` backed by [turboquant-core](https://github.com/Flaker420/turboquant-core); write a custom adapter class if you need a different backend

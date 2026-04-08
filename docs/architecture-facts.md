@@ -1,6 +1,6 @@
 # Architecture facts
 
-This document records the frozen architecture priors for each supported model. The evaluation harness treats these as fixed -- it studies **compression policy**, not architecture design.
+This document records the frozen architecture priors for each supported model. The framework treats these as fixed -- it tests, implements, and benchmarks **compression policy**, not architecture design.
 
 ## Qwen3.5-9B (hybrid)
 
@@ -35,4 +35,4 @@ TurboQuant-core backend: `Qwen25DenseKVBackend` (hook helper: `patch_qwen25_with
 - Do **not** spend time tuning architecture internals
 - Do **not** treat the layer schedule as a first-pass knob
 - Do focus on **compression policy**, memory, latency, and output quality
-- The evaluation harness studies what works in a real workflow and where the practical cliff appears
+- The framework benchmarks what works in practice and where the practical cliff appears for each model
