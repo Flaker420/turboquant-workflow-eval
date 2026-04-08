@@ -1,7 +1,8 @@
 # Review: Data Creation & Methods — Quality and Pertinence
 
 > Scope: evaluation of the data artefacts, measurement methodology, and
-> fitness-for-purpose of the workflow study implemented in this repository.
+> fitness-for-purpose of the test/implementation/benchmarking framework
+> in this repository.
 
 ---
 
@@ -301,11 +302,16 @@ Ranked by impact-to-effort ratio. Implementation status updated as of PRs
    prompt pack alongside the fixed pack. However, no long-context prompts are
    included in the default prompt pack yet.
 
-5. **~~Execute generated code for coding prompts.~~** **Done.**
-   `code_runner.py` extracts Python code blocks and runs them against
-   `test_cases` from the prompt YAML in a sandboxed subprocess with timeout.
-   Results appear as `code_passed`, `code_failed`, `code_errors`, and
-   `code_verdict` in output rows.
+5. **~~Execute generated code for coding prompts.~~** **Reverted along
+   with the verdict pipeline.** `code_runner.run_code_with_tests` is
+   still importable from `src/turboquant_workflow_eval/code_runner.py`
+   but is no longer called from the study loop or the scoring layer:
+   the divergence-metrics rewrite removed the `code_passed`,
+   `code_failed`, `code_errors`, and `code_verdict` fields from the
+   row schema along with the green/yellow/red verdict aggregator that
+   consumed them. Re-enabling code execution would require a new
+   scoring-layer contract consistent with the divergence-metrics
+   schema.
 
 6. **~~Add 3–5 repetitions per prompt-policy pair.~~** **Done.** The study
    config supports a `repetitions` parameter (default 3). Additional

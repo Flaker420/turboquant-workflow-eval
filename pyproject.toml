@@ -1,7 +1,7 @@
 [project]
 name = "turboquant-workflow-eval"
 version = "0.3.0"
-description = "RunPod-first evaluation harness for TurboQuant KV-cache compression across supported models."
+description = "Model-agnostic test, implementation, and benchmarking framework for TurboQuant-style KV-cache compression."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []

@@ -51,16 +51,6 @@ source .env.runpod
 source /workspace/venvs/turboquant-eval/bin/activate
 ```
 
-## Web UI
-
-After bootstrapping, launch the Gradio web UI for browser-based interaction:
-
-```bash
-make ui
-```
-
-The UI starts on port 7860. Access it through your pod's proxy URL (e.g., `https://<pod-id>-7860.proxy.runpod.net`). It covers environment validation, model loading, preflight instrumentation, study execution, and results exploration.
-
 ## Manual setup
 
 The detailed manual sequence is in `docs/manual-runbook.md`.

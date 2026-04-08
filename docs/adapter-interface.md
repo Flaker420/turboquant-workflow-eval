@@ -117,7 +117,7 @@ python -m turboquant_workflow_eval --study configs/studies/default_qwen35_9b.py 
   --set-policy baseline.enabled=false
 ```
 
-The first segment of `--set-policy` is matched against `PolicyConfig.name`; `*` matches every policy. The remaining dot-path is applied via `replace_path` (`src/turboquant_workflow_eval/schema.py`), which recursively rebuilds the frozen dataclass and re-runs `__post_init__` validation — an override that produces an invalid policy fails fast with a clear error. The Gradio UI's **Policy Overrides** accordion (currently broken pending the UI rework PR) will reuse the same mechanism.
+The first segment of `--set-policy` is matched against `PolicyConfig.name`; `*` matches every policy. The remaining dot-path is applied via `replace_path` (`src/turboquant_workflow_eval/schema.py`), which recursively rebuilds the frozen dataclass and re-runs `__post_init__` validation — an override that produces an invalid policy fails fast with a clear error.
 
 ## Important
 

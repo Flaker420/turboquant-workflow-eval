@@ -9,7 +9,7 @@ OUTPUT_DIR ?= outputs/study_run
 DOWNLOAD_OUTPUT ?= outputs/download_summary.json
 RESCORE_INPUT ?= $(OUTPUT_DIR)/rows.jsonl
 
-.PHONY: help test validate download-model download-all check-cache list-attention preflight dry-run smoke-test study study-full rescore generate-prompts ui
+.PHONY: help test validate download-model download-all check-cache list-attention preflight dry-run smoke-test study study-full rescore generate-prompts
 
 help:
 	@printf "%s\n" \
@@ -22,11 +22,10 @@ help:
 	  "make preflight                  # Run preflight instrumentation" \
 	  "make dry-run                    # Validate configs without GPU (<1s)" \
 	  "make smoke-test                 # Quick single-prompt test" \
-	  "make study POLICY_CONFIGS=...   # Run workflow study" \
+	  "make study POLICY_CONFIGS=...   # Run study" \
 	  "make study-full POLICY_CONFIGS=... # Run study with full prompt set" \
 	  "make rescore RESCORE_INPUT=...  # Re-score existing results (no GPU)" \
-	  "make generate-prompts           # Generate long-context prompts" \
-	  "make ui                         # Launch Gradio web UI"
+	  "make generate-prompts           # Generate long-context prompts"
 
 test:
 	pytest -q
@@ -66,6 +65,3 @@ rescore:
 
 generate-prompts:
 	python scripts/generate_prompts.py --model-config $(MODEL_CONFIG) --output prompts/generated_long_context.yaml
-
-ui:
-	python app.py
