@@ -53,7 +53,6 @@ Built in and ready to run:
 - automated metrics layer: token-level divergence vs baseline (exact match, first-divergence-token index, common-prefix fraction, edit distance) plus theoretical KV-cache compression bytes derived from policy settings -- see "Why these metrics" below
 - repetition support with mean/std aggregation for stable benchmarking
 - prompt generation script for long-context evaluation prompts
-- Gradio web UI (`app.py`) with 8 tabs for interactive workflow execution
 - `--dry-run` validation without GPU (validates configs, paths, adapters in <1 second)
 - `--single` smoke-test mode (one prompt, one policy, one repetition)
 - `--set key=value` CLI config overrides with dot-notation (e.g. `--set runtime.max_new_tokens=128`)
@@ -176,12 +175,6 @@ Or Qwen2.5-3B-Instruct:
 bash scripts/bootstrap_runpod.sh --download-model --model-config configs/model/qwen25_3b.py
 ```
 
-Alternatively, after bootstrapping, launch the web UI to run the entire workflow from your browser:
-
-```bash
-make ui
-```
-
 ### 2) Validate the scaffold
 
 ```bash
@@ -245,39 +238,6 @@ make study \
 
 After that, you can optionally enable the aggressive template for a second-pass stress comparison.
 
-## Web UI (Gradio)
-
-The repository includes a browser-based Gradio UI that covers the full workflow. This is especially useful on RunPod, where you can access it through the pod's exposed port.
-
-### Launching the UI
-
-```bash
-make ui
-```
-
-Or directly:
-
-```bash
-python app.py
-```
-
-The UI starts on `http://0.0.0.0:7860`. On RunPod, access it through your pod's proxy URL at port 7860.
-
-### UI tabs
-
-| Tab | Purpose |
-|-----|---------|
-| **Environment** | Validate CUDA/torch setup, check HuggingFace cache, download models |
-| **Model Inspection** | Load a model into memory, discover and inspect attention blocks |
-| **Preflight** | Run Q/K/V tensor statistics on loaded model, view results as JSON |
-| **Study Runner** | Select study and policy configs, filter prompts, run study with pause/resume/stop controls |
-| **Results** | Browse completed study outputs: comparison table, per-prompt text, run metadata |
-| **Quick Test** | Run a single prompt with parameter sliders (max tokens, temperature, repetitions), see instant results |
-| **Re-Score** | Recompute divergence + KV-cache compression metrics from a saved `rows.jsonl` (no GPU) |
-| **Comparison** | Side-by-side diff of two study runs with divergence + compression deltas |
-
-The UI calls the same Python library functions as the CLI scripts. A model loaded in the Model Inspection tab stays in memory and is reused by the Preflight and Quick Test tabs. (Note: the Re-Score and Comparison tab descriptions above describe the post-rework target behaviour; `app.py` itself is currently broken -- see the warning below the CLI section.)
-
 ## Manual step-by-step path
 
 The manual runbook is in:
@@ -287,14 +247,6 @@ The manual runbook is in:
 That document includes each step separately plus the parameters for each script.
 
 ## Script usage summary
-
-### `app.py` (Gradio UI)
-
-```bash
-python app.py
-```
-
-Launches the web UI on port 7860. See the [Web UI](#web-ui-gradio) section above.
 
 ### `scripts/bootstrap_runpod.sh`
 
@@ -453,8 +405,6 @@ python -m turboquant_workflow_eval --study configs/studies/default_qwen35_9b.py 
 python -m turboquant_workflow_eval --rescore outputs/study_run/rows.jsonl
 ```
 
-> **Note:** the Gradio UI is **temporarily broken** between this PR and the UI rework PR. `app.py` still imports the deleted YAML loaders; launching it will fail at import. Use the CLI in the meantime.
-
 ## Outputs
 
 For each policy you test, the repo produces concrete artifacts you can compare:
@@ -537,7 +487,6 @@ functions of the row contents. The rescore path:
 
 ## Repository layout
 
-- `app.py` -- Gradio web UI (launch with `make ui`)
 - `configs/` -- model, policy, and study configs
 - `docs/` -- architecture facts, scope, RunPod setup, manual runbook, adapter contract, data-workflow review, and current RunPod state
 - `prompts/` -- fixed workflow prompt pack
