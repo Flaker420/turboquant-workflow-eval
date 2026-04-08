@@ -22,7 +22,7 @@ help:
 	  "make preflight                  # Run preflight instrumentation" \
 	  "make dry-run                    # Validate configs without GPU (<1s)" \
 	  "make smoke-test                 # Quick single-prompt test" \
-	  "make study POLICY_CONFIGS=...   # Run workflow study" \
+	  "make study POLICY_CONFIGS=...   # Run study" \
 	  "make study-full POLICY_CONFIGS=... # Run study with full prompt set" \
 	  "make rescore RESCORE_INPUT=...  # Re-score existing results (no GPU)" \
 	  "make generate-prompts           # Generate long-context prompts"

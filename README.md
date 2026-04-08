@@ -34,7 +34,7 @@ The scaffold is **ready to run** for:
 - dependency installation
 - explicit model/tokenizer cache warmup
 - preflight instrumentation
-- baseline workflow study
+- baseline benchmarking run
 
 It includes a **pluggable adapter interface** and ready-to-use template configs (`safe_template.py`, `aggressive_template.py`) that use the built-in `TurboQuantAdapter` to delegate to [turboquant-core](https://github.com/Flaker420/turboquant-core). Both templates are enabled by default.
 
@@ -220,7 +220,7 @@ python -m turboquant_workflow_eval \
   --single --prompt-id math_01
 ```
 
-### 7) Run the workflow study
+### 7) Run the study
 
 Baseline only:
 
